@@ -1,0 +1,7 @@
+*~
+*.o
+*.cdf
+condense
+fitjac
+mcgen
+testEsplines
