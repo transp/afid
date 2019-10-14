@@ -38,7 +38,6 @@ spline *createBspline1d(const double *xarr, const double *yarr, const int ndata,
   /* Set up uniform knots */
   thespline->bwork = gsl_bspline_alloc(korder, ncoefs + 2 - korder);
   gsl_bspline_knots_uniform(thespline->lbound, thespline->ubound, thespline->bwork);
-  thespline->dwork = gsl_bspline_deriv_alloc(korder);
   thespline->bval = gsl_vector_alloc(korder);
   thespline->nzwork = gsl_matrix_alloc(korder, 2);
 
@@ -101,7 +100,6 @@ void splinealloc(spline **splinearr, const int nsplines, const int ncoefs,
     (*splinearr)[ispline].k = korder;
     (*splinearr)[ispline].ncoefs = ncoefs;
     (*splinearr)[ispline].bwork = gsl_bspline_alloc(korder, ncoefs + 2 - korder);
-    (*splinearr)[ispline].dwork = gsl_bspline_deriv_alloc(korder);
     (*splinearr)[ispline].bval = gsl_vector_alloc(korder);
     (*splinearr)[ispline].nzwork = gsl_matrix_alloc(korder, 2);
 
@@ -126,7 +124,6 @@ void splinealloc(spline **splinearr, const int nsplines, const int ncoefs,
 void splinedelete(spline *thespline)
 {
   gsl_bspline_free(thespline->bwork);
-  gsl_bspline_deriv_free(thespline->dwork);
   gsl_vector_free(thespline->bval);
   gsl_matrix_free(thespline->nzwork);
   free(thespline->coefs);
@@ -160,7 +157,7 @@ void getsplinederiv(spline *thespline, const double x, double *ys)
   if ((x < thespline->lbound) || (x > thespline->ubound)) return;
 
   gsl_bspline_deriv_eval_nonzero(x, 1, thespline->nzwork, &istart, &iend,
-				 thespline->bwork, thespline->dwork);
+				 thespline->bwork);
 
   for (i=0; i<thespline->k; i++) {
     c = thespline->coefs[istart+i];

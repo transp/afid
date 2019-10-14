@@ -10,7 +10,6 @@
 /* Data type definition */
 typedef struct {
   gsl_bspline_workspace       *bwork; /* gsl internal spline workspace, contains knot info */
-  gsl_bspline_deriv_workspace *dwork; /* gsl internal derivative workspace */
   gsl_vector                  *bval; /* Workspace for basis spline evaluation at x */
   gsl_matrix                  *nzwork; /* Workspace for basis spline, deriv evaluation */
   double                      *coefs; /* Array of coefficients of basis splines */

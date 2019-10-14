@@ -1,4 +1,4 @@
-#Load modules gcc/6.1.0, ntcc, netcdf-c/4.2, netcdf-fortran/4.2, mdsplus, lapack, gsl/1.16
+# source ./modules to set up module environment for build
 EXE = condense mcgen fitjac testEsplines
 
 # GNU compiler options
@@ -22,15 +22,15 @@ L_NETCDF  = -L$(NETCDFHOME)/lib -lnetcdf -lnetcdff
 L_MDSPLUS = -L$(MDSPLUS_DIR)/lib -lMdsLib
 
 fitjac: fitjac.c spline_interface.o
-	$(CC) $(CFLAGS) -o $@ $< spline_interface.o -L${GSLHOME}/lib -lgsl -lgslcblas -L${NETCDFHOME}/lib -lnetcdf -lm
+	$(CC) $(CFLAGS) -o $@ $< spline_interface.o -L${GSL_HOME}/lib -lgsl -lgslcblas -L${NETCDFC_HOME}/lib -lnetcdf -lm
 
 condense: condense.c
-	$(CC) $(CFLAGS) -o $@ $< -L${NETCDFHOME}/lib -lnetcdf
+	$(CC) $(CFLAGS) -o $@ $< -L${NETCDFC_HOME}/lib -lnetcdf
 
 testEsplines: testEsplines.f90 spline_interface.o particleSplines.o
 	$(FC) $(FFLAGS) testEsplines.f90 -o $@ \
 	spline_interface.o particleSplines.o \
-	-L${GSLHOME}/lib -lgsl -lgslcblas -lm
+	-L${GSL_HOME}/lib -lgsl -lgslcblas -lm
 
 %.o: %.c
 	$(CC) -c $(CFLAGS) $(INCLUDES) -o $@ $< 
