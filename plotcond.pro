@@ -1,6 +1,7 @@
 PRO plotcond, fname, sgn=sgn, ylog=uylog, nbins=nbins
 IF N_ELEMENTS(fname) EQ 0 THEN fname = '124379A30_condensed.cdf'
 IF N_ELEMENTS(sgn) EQ 0 THEN sgn=0
+IF N_ELEMENTS(uylog) EQ 0 THEN uylog=0
 IF N_ELEMENTS(nbins) EQ 0 THEN nbins=128
 
 WINDOW,0,XSIZE=1347,YSIZE=1010

@@ -5,3 +5,6 @@ condense
 fitjac
 mcgen
 testEsplines
+mcgen.in
+mucoarse[0-]*
+pdist[0-]1.spl

@@ -1,4 +1,4 @@
-PRO plotjacn, fname, nparts=nparts, sgn=sgn
+PRO plotjacn, fname, nparts=npartsmax, sgn=sgn
 IF N_ELEMENTS(fname) EQ 0 THEN fname = '37065Y022_jacobian.cdf'
 IF N_ELEMENTS(sgn) EQ 0 THEN sgn=0
 
@@ -12,6 +12,15 @@ IF ptcid EQ -1 THEN BEGIN
 ENDIF
 NCDF_DIMINQ, ncid, ptcid, dummy, nparts
 PRINT,nparts,' particles in file'
+IF N_ELEMENTS(npartsmax) NE 0 THEN BEGIN
+  IF npartsmax LT nparts THEN nparts = npartsmax
+  PRINT, 'Plotting first ',nparts
+ENDIF
+IF nparts LT 1600 THEN BEGIN
+  PRINT, 'Not enough particles for binning; need N GE 1600.'
+  WDELETE, 0
+  RETURN
+ENDIF
 pdata = DBLARR(3,nparts)
 
 ;Read toroidal angular momentum
