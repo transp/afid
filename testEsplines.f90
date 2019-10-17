@@ -4,7 +4,6 @@ PROGRAM testEsplines
   REAL*8 val, dke, dp, ddp, ddk
   INTEGER, PARAMETER :: npts=400
   INTEGER nmubinsn, nmubinsp, ike, ipp, der, sgnv
-  INTEGER ierr, nprocs, myrank
   NAMELIST /params/ mu, der, sgnv
 
   !Read input options:
@@ -43,7 +42,7 @@ PROGRAM testEsplines
         val = ddk
      END IF
   END IF
-  PRINT *,myrank,': val=',val
+  PRINT *,'middle val=',val
 
   !Create output file, write header
   OPEN(9, FILE="mufine", STATUS="REPLACE", ACTION="WRITE")
