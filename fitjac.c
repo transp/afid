@@ -5,9 +5,6 @@
 #include "netcdf.h"
 #include "spline_interface.h"
 
-#define DEBUG
-#define PPBIN 40
-
 /* Type definitions */
 typedef struct {
   double pphi, mu, ke, wt;
@@ -22,37 +19,82 @@ void fillbins(double ***arr, int nk, double cmin, double ew,
 	      vvect *part, int ji, int jf);
 int killorphans(int **, const int, const int);
 int threshold(int **, const int, const int, const int);
-void gaussblur(double **, const int, const int, const double, const double);
+void gaussblur(double **, const int, const int, const double, const double, const int);
 int getlbound(vvect *, const int);
 
 /******************************************************************************/
 int main(int argc, char *argv[])
 {
-  FILE   *fp;
-#ifdef DEBUG
-  FILE   *fp2;
-  char   f2name[64];
-  double dtally;
-#endif
-  char outname[32], inname[96];
+  FILE   *fp, *fp2;
+  char outname[32], inname[96], f2name[64];
   vvect  *particle, *jacobian;
   spline **pspline;
   spline *kspline;
   double *ke, *pphi, *count;
   double *mubounds;
   double **binarr, **jacarr;
-  const double sigma_ptcl = 1.334;
-  const double sigma_jac = 1.75;
-  const int minbins = 7;
+  double  sigma_ptcl = 1.334, sigma_jac = 1.75;
   double  delta, ratio, pmin, pmax, cmin, emax;
-  double  pbinwidth, ebinwidth, elvolinv;
-  int     nparts, njac, nmubins, i, j, k, nkbins, npbins, npcoefs, nkcoefs;
+  double  pbinwidth, ebinwidth, elvolinv, dtally;
+  int     nparts, njac, nmubins=25, i, j, k, nkbins, npbins, npcoefs, nkcoefs;
   int     binstart, binstop, jbinstart, jbinstop, ko, kocount=0, lbound, jlbound;
-  int     lmin=0, lmax, jlmin=0, jlmax, mu_eqpart=1;
+  int     lmin=0, lmax, jlmin=0, jlmax, mu_eqpart=1, ppbin=40, minbins=7, debug_flag=0;
 
+  /* If there are no arguments, print a usage message. */
   if (argc==1) {
-    fputs("Enter file root.\n", stderr);
+    fputs("Usage: fitjac <fileroot> [options]\n", stderr);
+    fputs("\nOptions:\n", stderr);
+    fprintf(stderr, "\t-minbins <minimum number of bins in any direction> (default %d)\n", minbins);
+    fprintf(stderr, "\t-ppbin <particles/bin target> (default %d)\n", ppbin);
+    fprintf(stderr, "\t-nmu <number of mu bins> (default %d), 0 to calculate based on ppbin\n", nmubins);
+    fprintf(stderr, "\t-mueqw: specify equal-width mu bins (default: equal particle count)\n");
+    fprintf(stderr, "\t-sigma_p <particle bin gauss blur radius> (default %.3lf)\n", sigma_ptcl);
+    fprintf(stderr, "\t-sigma_j <Jacobian bin gauss blur radius> (default %.3lf)\n", sigma_jac);
+    fprintf(stderr, "\t-debug: generate debugging information, including mucoarse files.\n");
+    fputs("\n", stderr);
     exit(0);
+  }
+
+  /* Parse command-line options */
+  for (i=2; i<argc; i++) {
+    if (!strncmp(argv[i], "-minbins", 8)) {
+      minbins = atoi(argv[++i]);
+      if (minbins < 7) minbins = 7;
+      fprintf(stderr, "Setting min. bin count to %d.\n", minbins);
+      continue;
+    }
+    if (!strncmp(argv[i], "-ppbin", 6)) {
+      ppbin = atoi(argv[++i]);
+      if (ppbin < 2) ppbin = 2;
+      fprintf(stderr, "Targeting %d particles/bin.\n", ppbin);
+      continue;
+    }
+    if (!strncmp(argv[i], "-nmu", 4)) {
+      nmubins = atoi(argv[++i]);
+      continue;
+    }
+    if (!strncmp(argv[i], "-mueqw", 6)) {
+      mu_eqpart = 0;
+      fputs("Using equally spaced mu bins.\n", stderr);
+      continue;
+    }
+    if (!strncmp(argv[i], "-sigma_p", 8)) {
+      sigma_ptcl = atof(argv[++i]);
+      if (sigma_ptcl < 0.0) sigma_ptcl = 0.0;
+      fprintf(stderr, "Setting particle blurring radius to %.6lf.\n", sigma_ptcl);
+      continue;
+    }
+    if (!strncmp(argv[i], "-sigma_j", 8)) {
+      sigma_jac = atof(argv[++i]);
+      if (sigma_jac < 0.0) sigma_jac = 0.0;
+      fprintf(stderr, "Setting Jacobian blurring radius to %.6lf.\n", sigma_jac);
+      continue;
+    }
+    if (!strncmp(argv[i], "-debug", 6)) {
+      debug_flag = 1;
+      fputs("Generating debugging info.\n", stderr);
+      continue;
+    }
   }
 
   /* Read all particle data from file */
@@ -97,7 +139,7 @@ int main(int argc, char *argv[])
 	    jacobian[jlmin].mu, jacobian[jlmax-1].mu);
 
     /* Set up mu bin boundaries */
-    nmubins = 25; /* ceil(pow((double)nparts/PPBIN, 1.0/3.0)); */
+    if (nmubins < 1) nmubins = ceil(pow((double)nparts/ppbin, 1.0/3.0));
     if (nmubins < minbins) nmubins = minbins;
     fprintf(stderr, " Using %d bins in mu direction.\n", nmubins);
     mubounds = (double *)malloc((nmubins+1)*sizeof(double));
@@ -122,11 +164,11 @@ int main(int argc, char *argv[])
       printf(" Bin %3d: %le < mu < %le (width = %le)\n",
 	     i, mubounds[i], mubounds[i+1], mubounds[i+1]-mubounds[i]);
       fprintf(fp, "%.16le\n", mubounds[i+1]);
-#ifdef DEBUG
-      sprintf(f2name, "mucoarse%02d_%d", particle[lmin].sig, i);
-      fp2 = fopen(f2name, "w");
-      fprintf(fp2, "%le\t%le\n", mubounds[i], mubounds[i+1]);
-#endif
+      if (debug_flag) {
+	sprintf(f2name, "mucoarse%02d_%d", particle[lmin].sig, i);
+	fp2 = fopen(f2name, "w");
+	fprintf(fp2, "%le\t%le\n", mubounds[i], mubounds[i+1]);
+      }
 
       /* Find last entry in this bin, bounds on momentum, energy */
       pmin = pmax = particle[binstart].pphi;
@@ -151,7 +193,7 @@ int main(int argc, char *argv[])
 
       /* Compute bin sizes */
       ratio = 1.0 - cmin*mubounds[i]/emax;
-      npbins = ceil(sqrt((double)(binstop+1-binstart)/(ratio*PPBIN)));
+      npbins = ceil(sqrt((double)(binstop+1-binstart)/(ratio*ppbin)));
       nkbins = ceil(ratio*npbins);
       if (npbins < minbins) npbins = minbins;
       if (nkbins < minbins) nkbins = minbins;
@@ -168,7 +210,7 @@ int main(int argc, char *argv[])
 	 kocount += ko; */
       fillbins(&jacarr, nkbins, cmin, ebinwidth, npbins, pmin, pbinwidth,
 	       jacobian, jbinstart, jbinstop);
-      gaussblur(jacarr, nkbins, npbins, sigma_jac, sigma_jac);
+      gaussblur(jacarr, nkbins, npbins, sigma_jac, sigma_jac, debug_flag);
 
       /* Take ratio */
       for (j=ko=0; j<nkbins; j++) {
@@ -183,24 +225,24 @@ int main(int argc, char *argv[])
 	free(jacarr[j]);
       }
       free(jacarr);
-      printf("  %d/%d anomal%s.\n", ko, nkbins*npbins, (ko==1)?"y":"ies");
-      gaussblur(binarr, nkbins, npbins, sigma_ptcl, sigma_ptcl);
+      if (ko) printf("  %d/%d anomal%s.\n", ko, nkbins*npbins, (ko==1)?"y":"ies");
+      gaussblur(binarr, nkbins, npbins, sigma_ptcl, sigma_ptcl, debug_flag);
 
-#ifdef DEBUG
-      fprintf(fp2, "%le\t%le\n", pmin, pmax);
-      fprintf(fp2, "%le\t%le\n", cmin, emax);
-      fprintf(fp2, "%d\t%d\n", nkbins, npbins);
-      /* Write bin counts */
-      for (j=dtally=0; j<nkbins; j++) {
-	for (k=0; k<npbins; k++) {
-	  fprintf(fp2, "%le\t", binarr[j][k]);
-	  dtally += binarr[j][k];
+      if (debug_flag) {
+	fprintf(fp2, "%le\t%le\n", pmin, pmax);
+	fprintf(fp2, "%le\t%le\n", cmin, emax);
+	fprintf(fp2, "%d\t%d\n", nkbins, npbins);
+	/* Write bin counts */
+	for (j=dtally=0; j<nkbins; j++) {
+	  for (k=0; k<npbins; k++) {
+	    fprintf(fp2, "%le\t", binarr[j][k]);
+	    dtally += binarr[j][k];
+	  }
+	  fprintf(fp2, "\n");
 	}
-	fprintf(fp2, "\n");
+	fclose(fp2);
+	printf("  Total = %lf\n", dtally);
       }
-      fclose(fp2);
-      printf("  Total = %lf\n", dtally);
-#endif
 
       /* Allocate, initialize 1D arrays for splining */
       if ((pphi = (double *)malloc((npbins+1) * sizeof(double))) == NULL) {
@@ -221,7 +263,7 @@ int main(int argc, char *argv[])
       }
 
       /* Construct 1D splines of pphi at each energy */
-      fprintf(stderr, "  Creating %d splines...\n", nkbins);
+      if (debug_flag) fprintf(stderr, "  Creating %d splines...\n", nkbins);
       npcoefs = 5*npbins/8;
       if (npcoefs < 6) npcoefs = 6;
       elvolinv = 1.0/(nparts*(mubounds[i+1]-mubounds[i])*pbinwidth*ebinwidth);
@@ -235,7 +277,7 @@ int main(int argc, char *argv[])
       free(binarr);  free(count);
 
       /* Now construct 1D splines of pphi coefficients across energies */
-      printf("  Splining %d splines...\n", nkbins);
+      if (debug_flag) printf("  Splining %d splines...\n", nkbins);
       if ((count = (double *)malloc((nkbins+1) * sizeof(double))) == NULL) {
 	fputs("Out of memory\n", stderr);
 	exit(1);
@@ -512,14 +554,14 @@ int threshold(int **barr, const int nrows, const int ncols, const int mincount)
 
 /******************************************************************************/
 void gaussblur(double **arr, const int nrows, const int ncols,
-		const double sigma_x, const double sigma_y)
+	       const double sigma_x, const double sigma_y, const int df)
 {
   double **work;
   double  *kernel;
   double   sum, twossqinv;
   int      kernel_size, ik, x, irow, icol, offset, cstart, cstop, kstart, kstop;
 
-  fprintf(stderr, "  gaussblur called; sigma = %lf, %lf\n", sigma_x, sigma_y);
+  if (df) fprintf(stderr, "  gaussblur called; sigma = %lf, %lf\n", sigma_x, sigma_y);
 
   /* Set up temporary workspace */
   if ((work = (double **)malloc(nrows * sizeof(double *))) == NULL) {
@@ -538,7 +580,7 @@ void gaussblur(double **arr, const int nrows, const int ncols,
     for (irow=0; irow<nrows; irow++)
       memcpy(work[irow], arr[irow], ncols*sizeof(double));
   } else {
-    printf("  Blurring rows using kernel size %d...\n", kernel_size);
+    if (df) printf("  Blurring rows using kernel size %d...\n", kernel_size);
     if ((kernel = (double *)malloc(kernel_size * sizeof(double))) == NULL) {
       fputs("Error: out of memory in gaussblur.\n", stderr);
       return;
@@ -584,7 +626,7 @@ void gaussblur(double **arr, const int nrows, const int ncols,
     for (irow=0; irow<nrows; irow++)
       memcpy(arr[irow], work[irow], ncols*sizeof(double));
   } else {
-    printf("  Blurring columns using kernel size %d...\n", kernel_size);
+    if (df) printf("  Blurring columns using kernel size %d...\n", kernel_size);
     if ((kernel = (double *)malloc(kernel_size * sizeof(double))) == NULL) {
       fputs("Error: out of memory in gaussblur.\n", stderr);
       return;
@@ -624,7 +666,7 @@ void gaussblur(double **arr, const int nrows, const int ncols,
 
   for (irow=0; irow<nrows; irow++) free(work[irow]);
   free(work);
-  fputs("  Blur applied.\n", stderr);
+  if (df) fputs("  Blur applied.\n", stderr);
 }
 
 /******************************************************************************/
