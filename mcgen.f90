@@ -125,7 +125,7 @@ SUBROUTINE writejac(froot, nparts, Rmin, Rmax, zmin, zmax, &
   REAL(KIND=rspec) buffer(3)
   REAL(KIND=rspec) zh, dz, rh, modB, vlh, dvl, vph, bphi
   REAL(KIND=rspec) mot, pmag, mu, Etot, pphi
-  REAL(KIND=rspec) rhs, drs, vphs, dvps, psi_lcfs, psiw
+  REAL(KIND=rspec) rhs, drs, vphs, psi_lcfs, psiw
   REAL x
   INTEGER ids(3), dimids(2)
   INTEGER ierr, ipart, isv, cpart, minseed

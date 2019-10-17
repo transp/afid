@@ -354,7 +354,7 @@ int get_species_info(const char *froot, species_info *specinf)
   int   *nbidx;
   const float m_p=1.6726e-27, q_p=1.6022e-19;
   size_t dimlen, specidx;
-  int    ierr, ispec, ncid, snbiid, dimid, massid, chargeid, sfusid;
+  int    ierr, ispec, ncid, snbiid, dimid, massid, chargeid;
 
   /* Open the plasma state NetCDF file */
   sprintf(statename, "%s_ps_ts1_state.cdf", froot);
