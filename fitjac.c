@@ -43,6 +43,9 @@ int main(int argc, char *argv[])
   /* If there are no arguments, print a usage message. */
   if (argc==1) {
     fputs("Usage: fitjac <fileroot> [options]\n", stderr);
+    fputs("\n\tBins particle distribution data from <fileroot>_condensed.cdf,\n", stderr);
+    fputs("\tnormalizes according to data in <fileroot>_jacobian.cdf, and fits\n", stderr);
+    fputs("\tsplines in E and P_phi to a series of mu cross-sections.\n", stderr);
     fputs("\nOptions:\n", stderr);
     fprintf(stderr, "\t-minbins <minimum number of bins in any direction> (default %d)\n", minbins);
     fprintf(stderr, "\t-ppbin <particles/bin target> (default %d)\n", ppbin);
@@ -164,11 +167,6 @@ int main(int argc, char *argv[])
       printf(" Bin %3d: %le < mu < %le (width = %le)\n",
 	     i, mubounds[i], mubounds[i+1], mubounds[i+1]-mubounds[i]);
       fprintf(fp, "%.16le\n", mubounds[i+1]);
-      if (debug_flag) {
-	sprintf(f2name, "mucoarse%02d_%d", particle[lmin].sig, i);
-	fp2 = fopen(f2name, "w");
-	fprintf(fp2, "%le\t%le\n", mubounds[i], mubounds[i+1]);
-      }
 
       /* Find last entry in this bin, bounds on momentum, energy */
       pmin = pmax = particle[binstart].pphi;
@@ -229,20 +227,29 @@ int main(int argc, char *argv[])
       gaussblur(binarr, nkbins, npbins, sigma_ptcl, sigma_ptcl, debug_flag);
 
       if (debug_flag) {
-	fprintf(fp2, "%le\t%le\n", pmin, pmax);
-	fprintf(fp2, "%le\t%le\n", cmin, emax);
-	fprintf(fp2, "%d\t%d\n", nkbins, npbins);
-	/* Write bin counts */
-	for (j=dtally=0; j<nkbins; j++) {
-	  for (k=0; k<npbins; k++) {
-	    fprintf(fp2, "%le\t", binarr[j][k]);
-	    dtally += binarr[j][k];
+	sprintf(f2name, "mucoarse%02d_%d", particle[lmin].sig, i);
+	if ((fp2 = fopen(f2name, "w")) == NULL)
+	  fprintf(stderr, "Error: could not create file %s for writing.\n", f2name);
+	else {
+	  /* Write header info to mucoarse file */
+	  fprintf(fp2, "%le\t%le\n", mubounds[i], mubounds[i+1]);
+	  fprintf(fp2, "%le\t%le\n", pmin, pmax);
+	  fprintf(fp2, "%le\t%le\n", cmin, emax);
+	  fprintf(fp2, "%d\t%d\n", nkbins, npbins);
+
+	  /* Write bin counts */
+	  dtally = 0.0;
+	  for (j=0; j<nkbins; j++) {
+	    for (k=0; k<npbins; k++) {
+	      fprintf(fp2, "%le\t", binarr[j][k]);
+	      dtally += binarr[j][k];
+	    }
+	    fprintf(fp2, "\n");
 	  }
-	  fprintf(fp2, "\n");
+	  fclose(fp2);
+	  printf("  Total = %le\n", dtally);
 	}
-	fclose(fp2);
-	printf("  Total = %lf\n", dtally);
-      }
+      } // end if debug_flag
 
       /* Allocate, initialize 1D arrays for splining */
       if ((pphi = (double *)malloc((npbins+1) * sizeof(double))) == NULL) {
