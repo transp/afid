@@ -7,7 +7,7 @@
 #endif
 
 #ifdef PDF_NEAREST_NEIGHBOR
-#define PDFFN pdfnnn
+#define PDFFN pdfnn
 #define PDFDR pdfnnder
 #else
 #define PDFFN pdflin

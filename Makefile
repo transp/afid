@@ -4,8 +4,8 @@ EXE = condense mcgen fitjac testEsplines
 # GNU compiler options
 FC = gfortran
 CC = gcc
-CFLAGS    = -O2
-FFLAGS    = -O2
+CFLAGS    = -Wall -O2
+FFLAGS    = -Wall -O2
 
 # Includes, F90 Use files
 F90MODS = -I./ -I$(NTCCHOME)/mod

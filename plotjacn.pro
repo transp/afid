@@ -14,7 +14,7 @@ NCDF_DIMINQ, ncid, ptcid, dummy, nparts
 PRINT,nparts,' particles in file'
 IF N_ELEMENTS(npartsmax) NE 0 THEN BEGIN
   IF npartsmax LT nparts THEN nparts = npartsmax
-  PRINT, 'Plotting first ',nparts
+  PRINT, 'Plotting first',STRCOMPRESS(STRING(nparts))
 ENDIF
 IF nparts LT 1600 THEN BEGIN
   PRINT, 'Not enough particles for binning; need N GE 1600.'
