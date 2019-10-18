@@ -1,6 +1,7 @@
-PRO contours, cname, fname, der=der
+PRO contours, cname, fname, der=der, same=same
 
  IF N_ELEMENTS(der) EQ 0 THEN der = 0
+ IF N_ELEMENTS(same) EQ 0 THEN same = 0
 
  OPENR, 1, cname
  READF, 1, mumin, mumax
@@ -63,8 +64,8 @@ PRO contours, cname, fname, der=der
      yp = y
    ENDELSE
    PRINT, 'Bin derivative ranges from ',MIN(C),' to ',MAX(C)
-   scal = MAX(ABS(C))
-   scal = 34.3
+   scal = 2.0*MAX(ABS(C))
+   ;scal = 34.3
    flvs = DBLARR(nlf)
    flvs[nlf/2] = 0.0
    flvs[nlf/2 + 1:nlf-1] = 0.1 * scal * 10.0 ^ (FINDGEN(nlf/2)/((nlf/2) - 1.0))
@@ -77,7 +78,7 @@ PRO contours, cname, fname, der=der
    clab = INTARR(nl)  &  clab[nl/2] = 1
    CONTOUR, TRANSPOSE(C), xp, yp, LEVELS=lvs, /FOLLOW, /OVERPLOT, C_LABELS=clab
    PRINT, 'lvs = ',lvs
-   maxa = MAX(C)
+   maxa = MAX(ABS(C))
  ENDIF ELSE BEGIN
    sf = 2048.0/MAX(A)
    A = A * sf
@@ -133,12 +134,13 @@ PRO contours, cname, fname, der=der
  READF, 1, pmin, pmax
  READF, 1, cmin, emax
  READF, 1, nvals
+ PRINT,'nvals = ',STRCOMPRESS(STRING(nvals))
  B = DBLARR(nvals,nvals)
  READF, 1, B
  CLOSE, 1
  PRINT,'B ranges from ',MIN(B),' to ',MAX(B)
  PRINT, 'E from ',cmin*mu,' to ',emax,': range = ',emax - cmin*mu
- ;PRINT, 'P from ',pmin,' to ',pmax,': range =',pmax-pmin
+ PRINT, 'P from ',pmin,' to ',pmax,': range =',pmax-pmin
 
  ;xex = FLOOR(ALOG10(emax))
  PRINT, 'B  xex=',xex
@@ -147,10 +149,13 @@ PRO contours, cname, fname, der=der
  !Y.TITLE = 'P!D!4u!3!N x 10!E'+STRCOMPRESS(STRING(-yex))+'!N'
  x = (0.1^xex)*((emax - cmin*mu)*FINDGEN(nvals)/(nvals - 1.0) + cmin*mu)
  y = (0.1^yex)*(pmin + (pmax - pmin)*FINDGEN(nvals)/(nvals - 1.0))
- ;!Y.RANGE = [MIN(y), MAX(y)]
- ;!Y.STYLE = 1
+ ;
  !P.REGION = [0.54,0.0,1.0,1.0]
- ;!X.RANGE = [x[0], x[nvals-1]]
+ IF same EQ 0 THEN BEGIN
+    !X.RANGE = [x[0], x[nvals-1]]
+    !Y.RANGE = [MIN(y), MAX(y)]
+    !Y.STYLE = 1
+ ENDIF
  npcoefs = 5*npbins/8
  IF npcoefs LT 6 THEN npcoefs=6
  nkcoefs = 5*nkbins/8
@@ -158,7 +163,7 @@ PRO contours, cname, fname, der=der
 
 ;Plot derivative?
  IF der GT 0 THEN BEGIN
-   sf = maxa/MAX(B)
+   sf = maxa/MAX(ABS(B))
    B = B * sf
    PRINT,'B ranges from ',MIN(B),' to ',MAX(B)
    !P.TITLE = STRCOMPRESS(STRING(FLOOR(nkcoefs)))+' x'+STRCOMPRESS(STRING(FLOOR(npcoefs)))+$

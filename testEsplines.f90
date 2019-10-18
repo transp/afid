@@ -21,11 +21,17 @@ PROGRAM testEsplines
   CALL pspline_init(nmubinsn, nmubinsp)
   PRINT *,nmubinsn,' negative v bins and ',nmubinsp,' positive v bins read, normalized.'
 
-  !Find bounds
-  CALL getpsplinebounds(pmin, pmax, mumin, mumax, cmin, emax)
-  PRINT *,'p_phi from ',pmin,' to ',pmax
-  PRINT *,'   mu from ',mumin,' to ',mumax
-  PRINT *,'   KE from ',cmin*mumin,' to ',emax
+  !Find global bounds
+  CALL getpspline3bounds(pmin, pmax, mumin, mumax, cmin, emax)
+  PRINT *,'Global p_phi from ',pmin,' to ',pmax
+  PRINT *,'       mu from ',mumin,' to ',mumax
+  PRINT *,'       KE from ',cmin*mumin,' to ',emax
+  IF ((mu.LT.mumin).OR.(mu.GT.mumax)) STOP
+
+  !Find local bounds
+  CALL getpspline2bounds(mu, sgnv, pmin, pmax, cmin, emax)
+  PRINT *,'Local p_phi from ',pmin,' to ',pmax
+  PRINT *,'      KE from ',cmin*mu,' to ',emax
 
   !Set increment for interpolation grid
   dp = (pmax - pmin)/(npts - 1)
@@ -37,8 +43,10 @@ PROGRAM testEsplines
   ELSE
      CALL getpdfd(pmin + (npts/2)*dp, mu, emin + (npts/2)*dke, sgnv, val, ddp, ddk)
      IF (der.eq.1) THEN
+        PRINT *,'Differentiating with respect to Pphi.'
         val = ddp
      ELSE
+        PRINT *,'Differentiating with respect to E.'
         val = ddk
      END IF
   END IF

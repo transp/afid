@@ -46,8 +46,8 @@ int pspline_init_(int *n2d, int *p2d)
 /******************************************************************************/
 /* Return bounds of constants-of-motion-space cube containing the particle */
 /*  distribution function. */
-int getpsplinebounds_(double *pmin, double *pmax, double *mumin, double *mumax,
-		      double *cmin, double *emax)
+int getpspline3bounds_(double *pmin, double *pmax, double *mumin, double *mumax,
+		       double *cmin, double *emax)
 {
   *pmin = (psplinedata->pmin < nsplinedata->pmin) ?
     psplinedata->pmin : nsplinedata->pmin;
@@ -63,6 +63,34 @@ int getpsplinebounds_(double *pmin, double *pmax, double *mumin, double *mumax,
     psplinedata->cmin : nsplinedata->cmin;
   *emax = (psplinedata->emax > nsplinedata->emax) ?
     psplinedata->emax : nsplinedata->emax;
+
+  return 0;
+}
+
+/******************************************************************************/
+/* Return bounds of constants-of-motion-space rectangle containing particle */
+/*  distribution function at specified mu, sign(v) */
+int getpspline2bounds_(double *mu, int *sgnv,
+		       double *pmin, double *pmax, double *cmin, double *emax)
+{
+  spline3d *data;
+  int       mbin;
+
+  data = (*sgnv > 0) ? psplinedata : nsplinedata;
+
+  /* Find the mu bin containing this point */
+  for (mbin=0; mbin<data->nmubins; mbin++)
+    if (*mu < data->mubounds[mbin+1]) break;
+  if (mbin == data->nmubins) {
+    fputs("mu out of range in getpspline2bounds\n", stderr);
+    return 0;
+  }
+
+  /* Look up values */
+  *pmin = data->pespline[mbin].pmin;
+  *pmax = data->pespline[mbin].pmax;
+  *cmin = data->pespline[mbin].cmin;
+  *emax = data->pespline[mbin].emax;
 
   return 0;
 }
