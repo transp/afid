@@ -12,14 +12,14 @@ PRO contours, cname, fname, der=der, same=same
  READF, 1, A
  CLOSE, 1
  morig = MAX(A)
- PRINT,'A ranges from ',MIN(A),' to ',MAX(A)
+ PRINT,'Coarse bin data ranges from ',MIN(A),' to ',morig
 
  mnzk = nkbins-1
  FOR ik=nkbins-1,0,-1 DO BEGIN
   m = MAX(A[*,ik])
   IF m EQ 0.0 THEN mnzk = ik
  ENDFOR
- PRINT, 'mnzk=',mnzk,' / ',nkbins
+ PRINT, 'max nonzero k.e.  at m = ',mnzk,' / ',nkbins
 
  ;WINDOW, 0, XSIZE=1024, YSIZE=570
  SET_PLOT,'PS'
@@ -29,7 +29,7 @@ PRO contours, cname, fname, der=der, same=same
  !P.REGION = [0.0,0.0,0.46,1.0]
  !P.CHARSIZE = 2.0
  xex = FLOOR(ALOG10(emax))
- PRINT, 'A  xex=',xex
+ PRINT, ' x-axis exponent =',xex
  !X.TITLE = 'KE x 10!E'+STRCOMPRESS(STRING(-xex))+'!N'
  yex = FLOOR(ALOG10(pmax - pmin))
  !Y.TITLE = 'P!D!4u!3!N x 10!E'+STRCOMPRESS(STRING(-yex))+'!N'
@@ -51,7 +51,7 @@ PRO contours, cname, fname, der=der, same=same
  IF der GT 0 THEN BEGIN
    sf = 2.339/MAX(A)
    A = A * sf
-   PRINT,'A ranges from ',MIN(A),' to ',MAX(A)
+   PRINT,'Rescaled coarse data ranges from ',MIN(A),' to ',MAX(A)
    IF der EQ 1 THEN BEGIN
      !P.TITLE = '!9d!3H/!9d!3P: '+STRCOMPRESS(STRING(mumin))+' < !4l!3 < '+STRCOMPRESS(STRING(mumax))
      C = (A(1:npbins-1,*) - A(0:npbins-2,*)) / (y[1] - y[0])
@@ -77,12 +77,12 @@ PRO contours, cname, fname, der=der, same=same
    lvs[0:nl/2 - 1] = -REVERSE(lvs[nl/2 + 1:nl-1])
    clab = INTARR(nl)  &  clab[nl/2] = 1
    CONTOUR, TRANSPOSE(C), xp, yp, LEVELS=lvs, /FOLLOW, /OVERPLOT, C_LABELS=clab
-   PRINT, 'lvs = ',lvs
+   PRINT, 'levels = ',lvs
    maxa = MAX(ABS(C))
  ENDIF ELSE BEGIN
    sf = 2048.0/MAX(A)
    A = A * sf
-   PRINT,'A ranges from ',MIN(A),' to ',MAX(A)
+   PRINT,'Rescaled coarse data ranges from ',MIN(A),' to ',MAX(A)
    mna = MEAN(A)
    PRINT, 'Mean = ',mna
    !P.TITLE = STRCOMPRESS(STRING(FLOOR(nkbins)))+' x'+STRCOMPRESS(STRING(FLOOR(npbins)))+$
@@ -90,7 +90,7 @@ PRO contours, cname, fname, der=der, same=same
    flvs = MAX(A) ^ (FINDGEN(nlf)/(nlf-1.0))
    CONTOUR, TRANSPOSE(A), x, y, LEVELS=flvs, /CELL_FILL
    lvs = MAX(A) ^ (FINDGEN(nl)/(nl-1.0))
-   PRINT, 'A contours at ',lvs
+   PRINT, ' contours at ',lvs
    CONTOUR, TRANSPOSE(A), x, y, LEVELS=lvs, /FOLLOW, /OVERPLOT, C_LABELS=INTARR(nl)
    maxa = MAX(A)
  ENDELSE
@@ -129,21 +129,22 @@ PRO contours, cname, fname, der=der, same=same
  !X.RANGE = xold
  !Y.TICKS = ytkold
 
+ PRINT
  OPENR, 1, fname
  READF, 1, mu
  READF, 1, pmin, pmax
  READF, 1, cmin, emax
  READF, 1, nvals
- PRINT,'nvals = ',STRCOMPRESS(STRING(nvals))
+ PRINT,'Fine data linear dim = ',STRCOMPRESS(STRING(nvals))
  B = DBLARR(nvals,nvals)
  READF, 1, B
  CLOSE, 1
- PRINT,'B ranges from ',MIN(B),' to ',MAX(B)
+ PRINT,'Fine data ranges from ',MIN(B),' to ',MAX(B)
  PRINT, 'E from ',cmin*mu,' to ',emax,': range = ',emax - cmin*mu
  PRINT, 'P from ',pmin,' to ',pmax,': range =',pmax-pmin
 
  ;xex = FLOOR(ALOG10(emax))
- PRINT, 'B  xex=',xex
+ PRINT, ' x-axis exponent =',xex
  !X.TITLE = 'KE x 10!E'+STRCOMPRESS(STRING(-xex))+'!N'
  ;yex = FLOOR(ALOG10(pmax - pmin))
  !Y.TITLE = 'P!D!4u!3!N x 10!E'+STRCOMPRESS(STRING(-yex))+'!N'
@@ -165,7 +166,7 @@ PRO contours, cname, fname, der=der, same=same
  IF der GT 0 THEN BEGIN
    sf = maxa/MAX(ABS(B))
    B = B * sf
-   PRINT,'B ranges from ',MIN(B),' to ',MAX(B)
+   PRINT,'Rescaled fine data ranges from ',MIN(B),' to ',MAX(B)
    !P.TITLE = STRCOMPRESS(STRING(FLOOR(nkcoefs)))+' x'+STRCOMPRESS(STRING(FLOOR(npcoefs)))+$
      ' B-spline`: !4l!3 = '+STRCOMPRESS(STRING(mu))
    PRINT, 'Spline derivative ranges from ',MIN(B),' to ',MAX(B)
@@ -176,14 +177,14 @@ PRO contours, cname, fname, der=der, same=same
  ENDIF ELSE BEGIN
    sf = mna/MEAN(B)
    B = B * sf
-   PRINT,'B ranges from ',MIN(B),' to ',MAX(B)
+   PRINT,'Rescaled fine data ranges from ',MIN(B),' to ',MAX(B)
    PRINT, 'Mean = ',MEAN(B)
    !P.TITLE = STRCOMPRESS(STRING(FLOOR(nkcoefs)))+' x'+STRCOMPRESS(STRING(FLOOR(npcoefs)))+$
      ' B-spline: !4l!3 = '+STRCOMPRESS(STRING(mu))
-   PRINT, 'B  x range = ',!X.RANGE
-   PRINT, 'B  y range = ',!Y.RANGE
+   PRINT, '  x range = ',!X.RANGE
+   PRINT, '  y range = ',!Y.RANGE
    CONTOUR, TRANSPOSE(B), x, y, LEVELS=flvs, /CELL_FILL
-   PRINT, 'B contours at ',lvs
+   PRINT, ' contours at ',lvs
    CONTOUR, TRANSPOSE(B), x, y, LEVELS=[0.0, lvs], /FOLLOW, /OVERPLOT, C_LABELS=[1, INTARR(nl)]
  ENDELSE
 

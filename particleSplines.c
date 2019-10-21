@@ -6,6 +6,7 @@
 #include "mpi.h"
 #endif
 
+#define PDF_NEAREST_NEIGHBOR
 #ifdef PDF_NEAREST_NEIGHBOR
 #define PDFFN pdfnn
 #define PDFDR pdfnnder
@@ -25,6 +26,12 @@ int pspline_init_(int *n2d, int *p2d)
   double posint, negint;
   const int nsplint=192, nmuint=64;
   const char pname[] = "pdist01.spl", nname[] = "pdist-1.spl";
+
+#ifdef PDF_NEAREST_NEIGHBOR
+  fputs("Setting up splines for nearest-neighbor mu interpolation.\n", stderr);
+#else
+  fputs("Setting up splines for linear mu interpolation.\n", stderr);
+#endif
 
   /* Read data from files */
   nsplinedata = readspline(nname);  psplinedata = readspline(pname);
