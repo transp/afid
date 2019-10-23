@@ -14,7 +14,7 @@ typedef struct {
   spline2d *pespline;
   double   *mubounds;
   double    norm, pmin, pmax, cmin, emax;
-  int       nmubins;
+  int       logbins, nmubins;
 } spline3d;
 
 /* Function prototypes */

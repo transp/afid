@@ -33,7 +33,7 @@ if len(argv) > 1:
     # Requres fitjac in exec path.
     if not (os.access("pdist-1.spl", os.R_OK) and
             os.access("pdist01.spl", os.R_OK)):
-        os.system("fitjac "+jobid)
+        os.system("fitjac "+jobid+" -log")
 
 else: # No argument provided -> print usage message.
     print("Usage: "+argv[0]+" [NUBEAM job id]\n")

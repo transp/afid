@@ -17,7 +17,7 @@ int mcompar(const void *, const void *);
 void fillbins(double ***arr, int nk, double cmin, double ew,
 	      int np, double pmin, double pw,
 	      vvect *part, int ji, int jf);
-int killorphans(int **, const int, const int);
+int killorphans(double **, const int, const int);
 int threshold(int **, const int, const int, const int);
 void gaussblur(double **, const int, const int, const double, const double, const int);
 int getlbound(vvect *, const int);
@@ -35,10 +35,11 @@ int main(int argc, char *argv[])
   double **binarr, **jacarr;
   double  sigma_ptcl = 1.334, sigma_jac = 1.75;
   double  delta, ratio, pmin, pmax, cmin, emax;
-  double  pbinwidth, ebinwidth, elvolinv, dtally;
+  double  pbinwidth, ebinwidth, elvolinv, dtally, minlog, cbrat=0.625, rsq, rsqtol=0.985;
   int     nparts, njac, nmubins=25, i, j, k, nkbins, npbins, npcoefs, nkcoefs;
   int     binstart, binstop, jbinstart, jbinstop, ko, kocount=0, lbound, jlbound;
   int     lmin=0, lmax, jlmin=0, jlmax, mu_eqpart=1, ppbin=40, minbins=7, debug_flag=0;
+  int     logbins=0, nzero, koflag=0, bincount=0, mincoefs=6;
 
   /* If there are no arguments, print a usage message. */
   if (argc==1) {
@@ -47,12 +48,16 @@ int main(int argc, char *argv[])
     fputs("\tnormalizes according to data in <fileroot>_jacobian.cdf, and fits\n", stderr);
     fputs("\tsplines in E and P_phi to a series of mu cross-sections.\n", stderr);
     fputs("\nOptions:\n", stderr);
-    fprintf(stderr, "\t-minbins <minimum number of bins in any direction> (default %d)\n", minbins);
+    fprintf(stderr, "\t-log: fit splines to ln(f) rather than f itself.\n");
+    fprintf(stderr, "\t-minbins <min. # of bins in any direction> (default %d)\n", minbins);
     fprintf(stderr, "\t-ppbin <particles/bin target> (default %d)\n", ppbin);
     fprintf(stderr, "\t-nmu <number of mu bins> (default %d), 0 to calculate based on ppbin\n", nmubins);
     fprintf(stderr, "\t-mueqw: specify equal-width mu bins (default: equal particle count)\n");
+    fprintf(stderr, "\t-ii: ignore isolated single-particle bins\n");
     fprintf(stderr, "\t-sigma_p <particle bin gauss blur radius> (default %.3lf)\n", sigma_ptcl);
     fprintf(stderr, "\t-sigma_j <Jacobian bin gauss blur radius> (default %.3lf)\n", sigma_jac);
+    fprintf(stderr, "\t-crat <ratio of coef count to bin count> (default %.3lf)\n", cbrat);
+    fprintf(stderr, "\t-mincoefs <min. # of spline coefs in any direction> (default %d)\n", mincoefs);
     fprintf(stderr, "\t-debug: generate debugging information, including mucoarse files.\n");
     fputs("\n", stderr);
     exit(0);
@@ -60,6 +65,11 @@ int main(int argc, char *argv[])
 
   /* Parse command-line options */
   for (i=2; i<argc; i++) {
+    if (!strncmp(argv[i], "-log", 4)) {
+      logbins = 1;
+      fputs("Fitting log of distribution.\n", stderr);
+      continue;
+    }
     if (!strncmp(argv[i], "-minbins", 8)) {
       minbins = atoi(argv[++i]);
       if (minbins < 7) minbins = 7;
@@ -81,6 +91,11 @@ int main(int argc, char *argv[])
       fputs("Using equally spaced mu bins.\n", stderr);
       continue;
     }
+    if (!strncmp(argv[i], "-ii", 3)) {
+      koflag = 1;
+      fputs("Ignoring isolated single-occupancy bins.\n", stderr);
+      continue;
+    }
     if (!strncmp(argv[i], "-sigma_p", 8)) {
       sigma_ptcl = atof(argv[++i]);
       if (sigma_ptcl < 0.0) sigma_ptcl = 0.0;
@@ -93,6 +108,16 @@ int main(int argc, char *argv[])
       fprintf(stderr, "Setting Jacobian blurring radius to %.6lf.\n", sigma_jac);
       continue;
     }
+    if (!strncmp(argv[i], "-crat", 5)) {
+      cbrat = atof(argv[++i]);
+      fprintf(stderr, "Setting coef-to-bin ratio to %.6lf.\n", cbrat);
+      continue;
+    }
+    if (!strncmp(argv[i], "-mincoefs", 9)) {
+      mincoefs = atoi(argv[++i]);
+      fprintf(stderr, "Setting min. coef count to %d.\n", mincoefs);
+      continue;
+    }
     if (!strncmp(argv[i], "-debug", 6)) {
       debug_flag = 1;
       fputs("Generating debugging info.\n", stderr);
@@ -103,16 +128,16 @@ int main(int argc, char *argv[])
   /* Read all particle data from file */
   sprintf(inname, "%s_condensed.cdf", argv[1]);
   readdata(inname, &particle, &nparts);
-  fprintf(stderr, "%d particles read; last = %le\t%le\t%le\t%d\n", nparts,
-	  particle[nparts-1].pphi, particle[nparts-1].mu, particle[nparts-1].ke,
-	  particle[nparts-1].sig);
+  printf("%d particles read; last = %le\t%le\t%le\t%d\n", nparts,
+	 particle[nparts-1].pphi, particle[nparts-1].mu, particle[nparts-1].ke,
+	 particle[nparts-1].sig);
 
   /* Read all jacobian data from file */
   sprintf(inname, "%s_jacobian.cdf", argv[1]);
   readdata(inname, &jacobian, &njac);
-  fprintf(stderr, "%d particles read; last = %le\t%le\t%le\t%d\n", njac,
-	  jacobian[nparts-1].pphi, jacobian[nparts-1].mu, jacobian[nparts-1].ke,
-	  jacobian[nparts-1].sig);
+  printf("%d particles read; last = %le\t%le\t%le\t%d\n", njac,
+	 jacobian[nparts-1].pphi, jacobian[nparts-1].mu, jacobian[nparts-1].ke,
+	 jacobian[nparts-1].sig);
 
   /* Calculate cmin (minimum ratio of ke to mu), emax */
   cmin = particle[0].ke / particle[0].mu;  emax = particle[0].ke;
@@ -121,30 +146,30 @@ int main(int argc, char *argv[])
     ratio = particle[i].ke / particle[i].mu;
     if (ratio < cmin) cmin = ratio;
   }
-  fprintf(stderr, "cmin = %lf; emax = %le\n", cmin, emax);
+  printf("cmin = %lf; emax = %le\n", cmin, emax);
 
   /* Sort the particles by sign of v||, increasing magnetic moment mu */
   fputs("Sorting by lambda, magnetic moment...\n", stderr);
   qsort(particle, nparts, sizeof(vvect), mcompar);
   lmax = lbound = getlbound(particle, nparts);
-  fprintf(stderr, "%d have l<0 (%.1lf %%).\n", lbound, 100.0*lbound/nparts);
+  printf("%d condensed particles have l<0 (%.1lf %%).\n", lbound, 100.0*lbound/nparts);
   fputs("Sorting Jacobian...\n", stderr);
   qsort(jacobian, njac, sizeof(vvect), mcompar);
   jlmax = jlbound = getlbound(jacobian, njac);
-  fprintf(stderr, "%d have l<0 (%.1lf %%).\n", jlbound, 100.0*jlbound/njac);
+  printf("%d Jacobian particles have l<0 (%.1lf %%).\n", jlbound, 100.0*jlbound/njac);
 
   do { /* Once for lambda<0, once for lambda>0 */
-    fprintf(stderr, " s=%d: mu ranges from %le to %le.\n", particle[lmin].sig,
-	    particle[lmin].mu, particle[lmax-1].mu);
+    printf("sgn=%d: mu ranges from %le to %le.\n", particle[lmin].sig,
+	   particle[lmin].mu, particle[lmax-1].mu);
     if (particle[lmin].mu < 0.0)
       fputs("Error: negative magnetic moment encountered.\n", stderr);
-    fprintf(stderr, " Jacobian: mu ranges from %le to %le.\n",
-	    jacobian[jlmin].mu, jacobian[jlmax-1].mu);
+    printf("Jacobian: mu ranges from %le to %le.\n",
+	   jacobian[jlmin].mu, jacobian[jlmax-1].mu);
 
     /* Set up mu bin boundaries */
     if (nmubins < 1) nmubins = ceil(pow((double)nparts/ppbin, 1.0/3.0));
     if (nmubins < minbins) nmubins = minbins;
-    fprintf(stderr, " Using %d bins in mu direction.\n", nmubins);
+    printf("Using %d bins in mu direction.\n", nmubins);
     mubounds = (double *)malloc((nmubins+1)*sizeof(double));
     mubounds[0] = 0.0;
     if (mu_eqpart) { /* equal particle count bins */
@@ -160,6 +185,7 @@ int main(int argc, char *argv[])
 
     sprintf(outname, "pdist%02d.spl", particle[lmin].sig);
     fp = fopen(outname, "w");
+    if (logbins) fputs("Log\n", fp);
     fprintf(fp, "%d\n", nmubins);
 
     /* Loop over mu bins */
@@ -202,10 +228,13 @@ int main(int argc, char *argv[])
       /* Fill bins */
       fillbins(&binarr, nkbins, cmin, ebinwidth, npbins, pmin, pbinwidth,
 	       particle, binstart, binstop);
-      /* ko = killorphans(binarr, nkbins, npbins); 
-	 printf("  %d orphan(s) removed.\n", ko);
-	 printf("  %.2lf ppb\n", (binstop - binstart + 1 - ko)/(double)(npbins*nkbins));
-	 kocount += ko; */
+      bincount += nkbins*npbins;
+      if (koflag) {
+	kocount += (ko = killorphans(binarr, nkbins, npbins));
+	if (ko || debug_flag)
+	  printf("  %d isolated bin%s zeroed.\n", ko, (ko>1)?"s":"");
+      } else ko=0;
+      printf("  Avg %.2lf particles/bin\n", (binstop - binstart + 1 - ko)/(double)(npbins*nkbins));
       fillbins(&jacarr, nkbins, cmin, ebinwidth, npbins, pmin, pbinwidth,
 	       jacobian, jbinstart, jbinstop);
       gaussblur(jacarr, nkbins, npbins, sigma_jac, sigma_jac, debug_flag);
@@ -251,6 +280,32 @@ int main(int argc, char *argv[])
 	}
       } // end if debug_flag
 
+      // Renormalize
+      elvolinv = 1.0/(nparts*(mubounds[i+1]-mubounds[i])*pbinwidth*ebinwidth);
+      for (j=0; j<nkbins; j++)   /* For each energy bin */
+	for (k=0; k<npbins; k++) /* For each p_phi bin */
+	  binarr[j][k] *= elvolinv;
+
+      if (logbins) { // Compute natural log
+	minlog = 1.0e+299;
+	for (nzero=j=0; j<nkbins; j++)
+	  for (k=0; k<npbins; k++)
+	    if (binarr[j][k] > 0.0) {
+	      binarr[j][k] = log(binarr[j][k]);
+	      if (binarr[j][k] < minlog) minlog = binarr[j][k];
+	    } else ++nzero; // end loop k, j
+	if (debug_flag) {
+	  printf("  minlog = %lf\n", minlog);
+	  printf("  %d zero val(s) to be replaced.\n", nzero);
+	}
+	if (nzero) {
+	  minlog -= 6.907755;
+	  for (j=0; j<nkbins; j++)
+	    for (k=0; k<npbins; k++)
+	      if (binarr[j][k] <= 0.0) binarr[j][k] = minlog;
+	}
+      } // end if logbins
+
       /* Allocate, initialize 1D arrays for splining */
       if ((pphi = (double *)malloc((npbins+1) * sizeof(double))) == NULL) {
 	fputs("Out of memory\n", stderr);
@@ -258,34 +313,36 @@ int main(int argc, char *argv[])
       }
       for (k=0; k<npbins; k++)
 	pphi[k] = pmin + (k + 0.5)*pbinwidth;
-      pphi[npbins] = pmax;
+      pphi[npbins] = (logbins) ? pmin : pmax;
       if ((count = (double *)malloc((npbins+1) * sizeof(double))) == NULL) {
 	fputs("Out of memory\n", stderr);
 	exit(1);
       }
-      count[npbins] = 0.0;
       if ((pspline = (spline **)malloc(nkbins * sizeof(spline *))) == NULL) {
 	fputs("Out of memory\n", stderr);
 	exit(1);
       }
 
       /* Construct 1D splines of pphi at each energy */
-      if (debug_flag) fprintf(stderr, "  Creating %d splines...\n", nkbins);
-      npcoefs = 5*npbins/8;
-      if (npcoefs < 6) npcoefs = 6;
-      elvolinv = 1.0/(nparts*(mubounds[i+1]-mubounds[i])*pbinwidth*ebinwidth);
+      npcoefs = ceil(cbrat*npbins);
+      if (npcoefs < mincoefs) npcoefs = mincoefs;
+      fprintf(stderr, "  mu bin %3d_%02d: Creating %d splines of %d coefs...\n",
+	      i, particle[lmin].sig, nkbins, npcoefs);
       for (j=0; j<nkbins; j++) { /* For each energy bin */
 	for (k=0; k<npbins; k++) /* For each p_phi bin */
-	  count[k] = binarr[j][k]*elvolinv;
+	  count[k] = binarr[j][k];
+	count[npbins] = (logbins) ? count[0] : 0.0;
 	free(binarr[j]);
 
-	pspline[j] = createBspline1d(pphi, count, npbins+1, npcoefs, 4, pmin, pmax, 0);
+	pspline[j] = createBspline1d(pphi, count, npbins +1, npcoefs, 4,
+				     pmin, pmax, &rsq, 0);
+	if (debug_flag) printf("  R^2 = %lf\n", rsq);
+	if (rsq < rsqtol) fprintf(stderr, "Warning: poor fit quality: R^2 = %lf\n", rsq);
       } /* end loop j */
       free(binarr);  free(count);
 
       /* Now construct 1D splines of pphi coefficients across energies */
-      if (debug_flag) printf("  Splining %d splines...\n", nkbins);
-      if ((count = (double *)malloc((nkbins+1) * sizeof(double))) == NULL) {
+      if ((count = (double *)malloc(nkbins * sizeof(double))) == NULL) {
 	fputs("Out of memory\n", stderr);
 	exit(1);
       }
@@ -295,14 +352,19 @@ int main(int argc, char *argv[])
       }
       for (k=0; k<nkbins; k++)
 	ke[k] = cmin*mubounds[i] + (k + 0.5)*ebinwidth;
-      nkcoefs = 5*nkbins/8;
-      if (nkcoefs < 6) nkcoefs = 6;
+      nkcoefs = ceil(cbrat*nkbins);
+      if (nkcoefs < mincoefs) nkcoefs = mincoefs;
+      if (debug_flag)
+	fprintf(stderr, "  Splining %d splines with %d coefs...\n", nkbins, nkcoefs);
       fprintf(fp, "%d\t%d\n", npcoefs, nkcoefs);
       for (j=0; j<npcoefs; j++) { /* For each coefficient */
 	for (k=0; k<nkbins; k++) /* For each ke bin */
 	  count[k] = pspline[k]->coefs[j];
 
-	kspline = createBspline1d(ke, count, nkbins, nkcoefs, 4, cmin*mubounds[i], emax, 0);
+	kspline = createBspline1d(ke, count, nkbins, nkcoefs, 4,
+				  cmin*mubounds[i], emax, &rsq, 0);
+	printf("  R^2[%d] = %lf\n", j, rsq);
+	if (rsq < rsqtol) fputs("Warning: poor fit quality!\n", stderr);
 
 	for (k=0; k<nkcoefs; k++)
 	  fprintf(fp, "%.16le\t", kspline->coefs[k]);
@@ -326,11 +388,11 @@ int main(int argc, char *argv[])
     jlmin = jlmax; jlmax = njac;
   } while (lmin < lmax);
 
-  printf("%d / %d particles (%.6f %%) deleted.\n", kocount, nparts,
-	  (100.0*kocount)/nparts);
+  if (koflag) printf("%d / %d bins (%.6f %%) zeroed.\n", kocount, bincount,
+		     (100.0*kocount)/bincount);
 
   free(particle); free(jacobian);
-
+  fputs("Done.\n", stderr);
   return 0;
 }
 
@@ -381,7 +443,8 @@ void readdata(const char *fname, vvect **p, int *np)
   ierr = nc_inq_vardimid(ncid, ppid, dimids);
   ierr = nc_inq_dimlen(ncid, dimids[0], &len0);
   ierr = nc_inq_dimlen(ncid, dimids[1], &len1);
-  fprintf(stderr, "%ld species, %ld particles\n", (long)len1, (long)len0);
+  printf("%s contains %ld species, %ld particles\n", fname,
+	 (long)len1, (long)len0);
   *np = (int)len0;
 
   /* Allocate storage */
@@ -484,61 +547,59 @@ void fillbins(double ***arr, int nk, double cmin, double ebinwidth,
 
 /******************************************************************************/
 /* Filter some noise by removing isolated particles, presumed lost.           */
-int killorphans(int **barr, const int m, const int n)
+int killorphans(double **barr, const int m, const int n)
 {
   int row, col, tally=0;
-
-  fputs("  Removing orphans...\n", stderr);
 
   /* Array interior */
   for (row=1; row<m-1; row++)
     for (col=1; col<n-1; col++)
-      if (barr[row][col] == 1)
-	if ((barr[row-1][col] == 0) && (barr[row][col-1] == 0) &&
-	    (barr[row][col+1] == 0) && (barr[row+1][col] == 0)) {
-	  barr[row][col] = 0; ++tally;
+      if (barr[row][col] > 0.0)
+	if ((barr[row-1][col] == 0.0) && (barr[row][col-1] == 0.0) &&
+	    (barr[row][col+1] == 0.0) && (barr[row+1][col] == 0.0)) {
+	  barr[row][col] = 0.0; ++tally;
 	}
 
   /* First & last rows */
   for (col=1; col<n-1; col++) {
-    if (barr[0][col] == 1)
-      if ((barr[0][col-1] == 0) && (barr[0][col+1] == 0) &&
-	  (barr[1][col] == 0)) {
-	barr[0][col] = 0; ++tally;
+    if (barr[0][col] > 0.0)
+      if ((barr[0][col-1] == 0.0) && (barr[0][col+1] == 0.0) &&
+	  (barr[1][col] == 0.0)) {
+	barr[0][col] = 0.0; ++tally;
       }
-    if (barr[m-1][col] == 1)
-      if ((barr[m-1][col-1] == 0) && (barr[m-1][col+1] == 0) &&
-	  (barr[m-2][col] == 0)) {
-	barr[m-1][col] = 0; ++tally;
+    if (barr[m-1][col] > 0.0)
+      if ((barr[m-1][col-1] == 0.0) && (barr[m-1][col+1] == 0.0) &&
+	  (barr[m-2][col] == 0.0)) {
+	barr[m-1][col] = 0.0; ++tally;
       }
   }
 
   /* First & last cols */
   for (row=1; row<m-1; row++) {
-    if (barr[row][0] == 1)
-      if ((barr[row-1][0] == 0) &&
-	  (barr[row][1] == 0) && (barr[row+1][0] == 0)) {
-	barr[row][0] = 0; ++tally;
+    if (barr[row][0] > 0.0)
+      if ((barr[row-1][0] == 0.0) &&
+	  (barr[row][1] == 0.0) && (barr[row+1][0] == 0.0)) {
+	barr[row][0] = 0.0; ++tally;
       }
-    if (barr[row][n-1] == 1)
-      if ((barr[row-1][n-1] == 0) && (barr[row][n-2] == 0) &&
-	  (barr[row+1][n-1] == 0)) {
-	barr[row][n-1] = 0; ++tally;
+    if (barr[row][n-1] > 0.0)
+      if ((barr[row-1][n-1] == 0.0) && (barr[row][n-2] == 0.0) &&
+	  (barr[row+1][n-1] == 0.0)) {
+	barr[row][n-1] = 0.0; ++tally;
       }
   }
 
   /* Corners */
-  if ((barr[0][0] == 1) && (barr[0][1] == 0) && (barr[1][0] == 0)) {
-    barr[0][0] = 0; ++tally;
+  if ((barr[0][0] > 0.0) && (barr[0][1] == 0.0) && (barr[1][0] == 0.0)) {
+    barr[0][0] = 0.0; ++tally;
   }
-  if ((barr[0][n-1] == 1) && (barr[0][n-2] == 0) && (barr[1][n-1] == 0)) {
-    barr[0][n-1] = 0; ++tally;
+  if ((barr[0][n-1] > 0.0) && (barr[0][n-2] == 0.0) && (barr[1][n-1] == 0.0)) {
+    barr[0][n-1] = 0.0; ++tally;
   }
-  if ((barr[m-1][0] == 1) && (barr[m-2][0] == 0) && (barr[m-1][1] == 0)) {
-    barr[m-1][0] = 0; ++tally;
+  if ((barr[m-1][0] > 0.0) && (barr[m-2][0] == 0.0) && (barr[m-1][1] == 0.0)) {
+    barr[m-1][0] = 0.0; ++tally;
   }
-  if ((barr[m-1][n-1] == 1) && (barr[m-2][n-1] == 0) && (barr[m-1][n-2] == 0)) {
-    barr[m-1][n-1] = 0; ++tally;
+  if ((barr[m-1][n-1] > 0.0) && (barr[m-2][n-1] == 0.0) && (barr[m-1][n-2] == 0.0)) {
+    barr[m-1][n-1] = 0.0; ++tally;
   }
 
   return tally;

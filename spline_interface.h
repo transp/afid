@@ -21,7 +21,7 @@ typedef struct {
 spline *createBspline1d(const double *xarr, const double *yarr, const int ndata,
 			const int ncoefs, const int korder,
 			const double, const double,
-			const unsigned long flags);
+			double *, const unsigned long flags);
 void splinealloc(spline **sa, const int ns, const int nc, const int k,
 		 const double lb, const double ub);
 void splinedelete(spline *);

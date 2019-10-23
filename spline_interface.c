@@ -1,5 +1,6 @@
 /* module load gsl; gcc -O -c spline_interface.c */
 #include "spline_interface.h"
+#include "gsl/gsl_statistics_double.h"
 
 /******************************************************************************/
 /* Create a 1D spline to fit a given 1D dataset with specified bounds, using  */
@@ -7,12 +8,13 @@
 spline *createBspline1d(const double *xarr, const double *yarr, const int ndata,
 			const int ncoefs, const int korder,
 			const double lbound, const double ubound,
-			const unsigned long flags)
+			double *rsquared, const unsigned long flags)
 {
   spline                        *thespline;
   gsl_multifit_linear_workspace *fwork;
   gsl_matrix                    *fitmat, *cov;
   gsl_vector                    *coefs, *yvec;
+  const double                   one = 1.0;
   double                         chisq;
   int                            jj, icol;
 
@@ -61,13 +63,9 @@ spline *createBspline1d(const double *xarr, const double *yarr, const int ndata,
   fwork = gsl_multifit_linear_alloc(ndata, ncoefs);
   cov = gsl_matrix_alloc(ncoefs, ncoefs);
   gsl_multifit_linear(fitmat, yvec, coefs, cov, &chisq, fwork);
+  *rsquared = one - chisq/gsl_stats_tss(yarr, 1, (size_t)ndata);
   gsl_matrix_free(fitmat);  gsl_matrix_free(cov);
   gsl_vector_free(yvec);  gsl_multifit_linear_free(fwork);
-
-  /* Evaluate goodness of fit */
-  chisq = chisq/(ndata - ncoefs);
-  /* fprintf(stderr, "chi-squared/dof = %le\n", chisq);
-     if (chisq > 1.0e-4) fputs("Warning: spline fit is poor.\n", stderr); */
 
   /* Copy spline coefficients to permanent data structure */
   thespline->ncoefs = ncoefs;

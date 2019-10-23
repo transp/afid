@@ -149,18 +149,27 @@ spline3d *readspline(const char *fname)
 {
   FILE     *fp;
   spline3d *data;
+  char     buf[64];
   double   emin;
   int      mbin, pcoef, kcoef, npcoefs, nkcoefs;
 
   /* Allocate storage */
   data = (spline3d *)malloc(sizeof(spline3d));
   data->norm = data->pmin = 1.0;  data->pmax = data->emax = -1.0;  data->cmin=1.0e+9;
+  data->logbins = 0;
 
   /* Open input file */
   if ((fp = fopen(fname, "r")) == NULL) {
     fprintf(stderr, "Error: could not open file %s for reading.\n", fname);
     exit(1);
   }
+
+  /* Check for log flag */
+  fgets(buf, 64, fp);
+  if ((*buf == 'L') || (*buf == 'l')) {
+    data->logbins = 1;
+    fprintf(stderr, "%s: bins are logarithmic.\n", fname);
+  } else rewind(fp);
 
   /* Read data */
   fscanf(fp, "%d", &data->nmubins);
@@ -325,9 +334,10 @@ double pdfnn(const double pphi, const double mu, const double ke, spline3d *data
   int    mbin, pcoef, pstart;
 
   /* Find the mu bin containing this point */
+  if (mu < 0.0) return 0.0;
   for (mbin=0; mbin<data->nmubins; mbin++)
     if (mu < data->mubounds[mbin+1]) break;
-  if (mbin == data->nmubins) return 0;
+  if (mbin == data->nmubins) return 0.0;
 
   /* Construct the vector of pphi coefficients here */
   pstart = getnzstart(data->pespline[mbin].pspline, pphi);
@@ -338,6 +348,7 @@ double pdfnn(const double pphi, const double mu, const double ke, spline3d *data
   /* Interpolate to get pdf val */
   getsplineval(data->pespline[mbin].pspline, pphi, &pdf);
   if (pdf < 0.0) return 0.0;
+  if (data->logbins) pdf = exp(pdf);
   return data->norm*pdf;
 }
 
@@ -346,7 +357,7 @@ double pdfnn(const double pphi, const double mu, const double ke, spline3d *data
 double pdfnnder(const double pphi, const double mu, const double ke, double *derivs,
 		spline3d *data)
 {
-  double ys[2];
+  double ys[2], factor=1.0;
   int    mbin, pcoef, pstart;
 
   /* Find the mu bin containing this point */
@@ -366,9 +377,10 @@ double pdfnnder(const double pphi, const double mu, const double ke, double *der
   /* Interpolate to get pdf, deriv vals */
   getsplinederiv(data->pespline[mbin].pspline, pphi, ys);
   if (*ys < 0.0) return *derivs = derivs[1] = 0.0;
-  *derivs = data->norm*ys[1];
+  if (data->logbins) factor = (ys[0] = exp(ys[0]));
+  *derivs = data->norm*factor*ys[1];
   getsplineval(data->pespline[mbin].ddkspline, pphi, derivs+1);
-  derivs[1] *= data->norm;
+  derivs[1] *= data->norm*factor;
 
   return data->norm*ys[0];
 }
