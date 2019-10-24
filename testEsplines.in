@@ -1,1 +1,1 @@
-&params mu=5.0e-15 der=1 sgnv=-1 /
+&params mu=1e-15 der=0 sgnv=+1 iorder=0 /

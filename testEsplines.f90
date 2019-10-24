@@ -3,23 +3,25 @@ PROGRAM testEsplines
   REAL*8 pmin, pmax, mumin, mumax, cmin, emin, emax, mu
   REAL*8 val, dke, dp, ddp, ddk
   INTEGER, PARAMETER :: npts=400
-  INTEGER nmubinsn, nmubinsp, ike, ipp, der, sgnv
-  NAMELIST /params/ mu, der, sgnv
+  INTEGER nmubinsn, nmubinsp, ike, ipp, der, sgnv, iorder
+  NAMELIST /params/ mu, der, sgnv, iorder
 
   !Read input options:
   ! mu = magnetic moment
   ! der = 0: distribution function f(p,mu,E)
   ! der = 1: df/dp
   ! der = 2: df/dE
+  mu=0.0; der=0; sgnv=1; iorder=0  ! Default values
   OPEN(8, FILE="testEsplines.in", STATUS="OLD", ACTION="READ")
   READ(8, NML=params)
   CLOSE(8)
-  PRINT *,'mu=',mu,',  der=',der,', sign(v)=',sgnv
+  PRINT *,'mu=',mu,',  der=',der,', sign(v)=',sgnv,', iorder=',iorder
 
   !Read spline data
   PRINT *,'Reading data...'
   CALL pspline_init(nmubinsn, nmubinsp)
   PRINT *,nmubinsn,' negative v bins and ',nmubinsp,' positive v bins read, normalized.'
+  CALL pspline_set_order(iorder)
 
   !Find global bounds
   CALL getpspline3bounds(pmin, pmax, mumin, mumax, cmin, emax)

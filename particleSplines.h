@@ -14,11 +14,14 @@ typedef struct {
   spline2d *pespline;
   double   *mubounds;
   double    norm, pmin, pmax, cmin, emax;
-  int       logbins, nmubins;
+  int       logbins, nmubins, iorder;
 } spline3d;
 
 /* Function prototypes */
 spline3d *readspline(const char *);
+inline int mubin(spline3d *, const double);
+double pdf2d(spline2d *, const double, const double, const int);
+double pdf2dder(spline2d *, const double, const double, const int, double *);
 double pdfnn(const double, const double, const double, spline3d *);
 double pdfnnder(const double, const double, const double, double *,
 		spline3d *);

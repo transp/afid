@@ -6,15 +6,6 @@
 #include "mpi.h"
 #endif
 
-#define PDF_NEAREST_NEIGHBOR
-#ifdef PDF_NEAREST_NEIGHBOR
-#define PDFFN pdfnn
-#define PDFDR pdfnnder
-#else
-#define PDFFN pdflin
-#define PDFDR pdflinder
-#endif
-
 spline3d *psplinedata, *nsplinedata;
 
 /* Fortran interface routines */
@@ -27,11 +18,7 @@ int pspline_init_(int *n2d, int *p2d)
   const int nsplint=192, nmuint=64;
   const char pname[] = "pdist01.spl", nname[] = "pdist-1.spl";
 
-#ifdef PDF_NEAREST_NEIGHBOR
-  fputs("Setting up splines for nearest-neighbor mu interpolation.\n", stderr);
-#else
-  fputs("Setting up splines for linear mu interpolation.\n", stderr);
-#endif
+  fputs("Setting up splines for interpolation.\n", stderr);
 
   /* Read data from files */
   nsplinedata = readspline(nname);  psplinedata = readspline(pname);
@@ -46,6 +33,27 @@ int pspline_init_(int *n2d, int *p2d)
   psplinedata->norm = nsplinedata->norm = 1.0/(posint + negint);
 
   *n2d = nsplinedata->nmubins;  *p2d = psplinedata->nmubins;
+
+  return 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+int pspline_set_order_(int *iorder)
+{
+  nsplinedata->iorder = *iorder;
+  psplinedata->iorder = *iorder;
+
+  switch(*iorder) {
+  case 0:
+    fputs("Setting interpolation type to nearest-neighbor.\n", stderr);
+    break;
+  case 1:
+    fputs("Setting interpolation type to linear.\n", stderr);
+    break;
+  default:
+    fprintf(stderr, "Warning: unrecognized interpolation type %d requested.\n", *iorder);
+    return 1;
+  }
 
   return 0;
 }
@@ -115,10 +123,22 @@ int pspline_free_()
 /* Evaluate f(p_phi, mu, E) by 2D cubic B-spline interpolation in P,E */
 int getpdf_(double *pphi, double *mu, double *ke, int *sgnv, double *f)
 {
-  if (*sgnv > 0)
-    *f = PDFFN(*pphi, *mu, *ke, psplinedata);
-  else
-    *f = PDFFN(*pphi, *mu, *ke, nsplinedata);
+  spline3d *data;
+
+  data = (*sgnv > 0) ? psplinedata : nsplinedata;
+
+  switch(data->iorder) {
+  case 0:
+    *f = pdfnn(*pphi, *mu, *ke, data);
+    break;
+  case 1:
+    *f = pdflin(*pphi, *mu, *ke, data);
+    break;
+  default:
+    fprintf(stderr, "Unsupported interpolation order %d in getpdf\n", data->iorder);
+    *f = 0.0;
+    return 1;
+  }
 
   return 0;
 }
@@ -129,12 +149,23 @@ int getpdf_(double *pphi, double *mu, double *ke, int *sgnv, double *f)
 int getpdfd_(double *pphi, double *mu, double *ke, int *sgnv, double *f,
 	    double *dfdp, double *dfdE)
 {
+  spline3d *data;
   double drv[2];
 
-  if (*sgnv > 0)
-    *f = PDFDR(*pphi, *mu, *ke, drv, psplinedata);
-  else
-    *f = PDFDR(*pphi, *mu, *ke, drv, nsplinedata);
+  data = (*sgnv > 0) ? psplinedata : nsplinedata;
+
+  switch(data->iorder) {
+  case 0:
+    *f = pdfnnder(*pphi, *mu, *ke, drv, data);
+    break;
+  case 1:
+    *f = pdflinder(*pphi, *mu, *ke, drv, data);
+    break;
+  default:
+    fprintf(stderr, "Unsupported interpolation order %d in getpdfd\n", data->iorder);
+    *f = *dfdp = *dfdE = 0.0;
+    return 1;
+  }
 
   *dfdp = drv[0];  *dfdE = drv[1];
 
@@ -156,7 +187,7 @@ spline3d *readspline(const char *fname)
   /* Allocate storage */
   data = (spline3d *)malloc(sizeof(spline3d));
   data->norm = data->pmin = 1.0;  data->pmax = data->emax = -1.0;  data->cmin=1.0e+9;
-  data->logbins = 0;
+  data->logbins = 0;  data->iorder = 0;
 
   /* Open input file */
   if ((fp = fopen(fname, "r")) == NULL) {
@@ -325,179 +356,159 @@ spline3d *readspline(const char *fname)
 }
 #endif
 
-#ifdef PDF_NEAREST_NEIGHBOR
 /******************************************************************************/
-/* Note: uses nearest-neighbor interpolation in mu direction. */
-double pdfnn(const double pphi, const double mu, const double ke, spline3d *data)
+// Find the mu bin containing the specified mu value.
+inline int mubin(spline3d *data, const double mu)
 {
-  double pdf;
-  int    mbin, pcoef, pstart;
+  int mbin;
 
-  /* Find the mu bin containing this point */
-  if (mu < 0.0) return 0.0;
-  for (mbin=0; mbin<data->nmubins; mbin++)
+  for (mbin=-1; mbin<data->nmubins; mbin++)
     if (mu < data->mubounds[mbin+1]) break;
-  if (mbin == data->nmubins) return 0.0;
 
-  /* Construct the vector of pphi coefficients here */
-  pstart = getnzstart(data->pespline[mbin].pspline, pphi);
-  for (pcoef=pstart; pcoef<pstart+4; pcoef++)
-    getsplineval(&(data->pespline[mbin].kspline[pcoef]), ke,
-		 &(data->pespline[mbin].pspline->coefs[pcoef]));
-
-  /* Interpolate to get pdf val */
-  getsplineval(data->pespline[mbin].pspline, pphi, &pdf);
-  if (pdf < 0.0) return 0.0;
-  if (data->logbins) pdf = exp(pdf);
-  return data->norm*pdf;
+  return mbin;
 }
 
 /******************************************************************************/
-/* Note: uses nearest-neighbor interpolation in mu direction. */
+// Evaluate the 2D spline at the specified pphi, ke point.
+double pdf2d(spline2d *data, const double pphi, const double ke, const int logbins)
+{
+  double pdf;
+  int    pcoef, pstart;
+
+  // Construct the vector of pphi coefficients for f at the specified ke.
+  pstart = getnzstart(data->pspline, pphi);
+  for (pcoef=pstart; pcoef<pstart+4; pcoef++)
+    getsplineval(data->kspline + pcoef, ke, &(data->pspline->coefs[pcoef]));
+
+  // Interpolate to get pdf value.
+  getsplineval(data->pspline, pphi, &pdf);
+  if (logbins) pdf = exp(pdf);
+  else if (pdf < 0.0) return 0.0; // Rectify negative f values
+  return pdf;
+}
+
+/******************************************************************************/
+// Evaluate the 2D spline and its first partial derivatives at
+//  the specified pphi, ke point.
+double pdf2dder(spline2d *data, const double pphi, const double ke,
+		const int logbins, double *fprime)
+{
+  double ys[2], factor=1.0;
+  int    pcoef, pstart;
+
+  // Construct the vector of f, df/dk pphi coefficients here
+  pstart = getnzstart(data->pspline, pphi);
+  for (pcoef=pstart; pcoef<pstart+4; pcoef++) {
+    getsplinederiv(data->kspline + pcoef, ke, ys);
+    data->pspline->coefs[pcoef]   = ys[0];
+    data->ddkspline->coefs[pcoef] = ys[1];
+  }
+
+  // Interpolate to get pdf, derivative values
+  //  If logbins then g == ln(f) else g == f
+  getsplinederiv(data->pspline, pphi, ys); // ys[0] = g;  ys[1] = dg/dpphi
+  if (logbins) factor = (ys[0] = exp(ys[0])); // f
+  else if (ys[0] < 0.0) return fprime[0] = fprime[1] = 0.0; // Rectify f < 0
+  fprime[0] = factor*ys[1]; // df/pphi
+  getsplineval(data->ddkspline, pphi, fprime+1);
+  fprime[1] *= factor;      // df/dke
+
+  return ys[0];
+}
+
+/******************************************************************************/
+// Evaluate f(P,mu,E) using nearest-neighbor interpolation in mu
+double pdfnn(const double pphi, const double mu, const double ke, spline3d *data)
+{
+  int mbin;
+
+  // Find the mu bin containing this point
+  mbin = mubin(data, mu);
+  if ((mbin < 0) || (mbin >= data->nmubins)) return 0.0; // out of range!
+
+  // Return the normalized spline value
+  return data->norm*pdf2d(data->pespline + mbin, pphi, ke, data->logbins);
+}
+
+/******************************************************************************/
+// Evaluate f(P,mu,E), df/dP, df/dE using nearest-neighbor interpolation in mu
 double pdfnnder(const double pphi, const double mu, const double ke, double *derivs,
 		spline3d *data)
 {
-  double ys[2], factor=1.0;
-  int    mbin, pcoef, pstart;
+  double fn;
+  int    mbin;
 
-  /* Find the mu bin containing this point */
-  if (mu < 0.0) return *derivs = derivs[1] = 0.0;
-  for (mbin=0; mbin<data->nmubins; mbin++)
-    if (mu < data->mubounds[mbin+1]) break;
-  if (mbin == data->nmubins) return *derivs = derivs[1] = 0.0;
+  // Find the mu bin containing this point
+  mbin = mubin(data, mu);
+  if ((mbin < 0) || (mbin >= data->nmubins)) // out of range!
+    return derivs[0] = derivs[1] = 0.0;
 
-  /* Construct the vector of pphi coefficients here */
-  pstart = getnzstart(data->pespline[mbin].pspline, pphi);
-  for (pcoef=pstart; pcoef<pstart+4; pcoef++) {
-    getsplinederiv(&(data->pespline[mbin].kspline[pcoef]), ke, ys);
-    data->pespline[mbin].pspline->coefs[pcoef] = *ys;
-    data->pespline[mbin].ddkspline->coefs[pcoef] = ys[1];
-  }
-
-  /* Interpolate to get pdf, deriv vals */
-  getsplinederiv(data->pespline[mbin].pspline, pphi, ys);
-  if (*ys < 0.0) return *derivs = derivs[1] = 0.0;
-  if (data->logbins) factor = (ys[0] = exp(ys[0]));
-  *derivs = data->norm*factor*ys[1];
-  getsplineval(data->pespline[mbin].ddkspline, pphi, derivs+1);
-  derivs[1] *= data->norm*factor;
-
-  return data->norm*ys[0];
+  // Return the normalized spline, derivative values
+  fn = pdf2dder(data->pespline + mbin, pphi, ke, data->logbins, derivs);
+  derivs[0] *= data->norm;  derivs[1] *= data->norm;
+  return data->norm*fn;
 }
 
-#else
 /******************************************************************************/
-/* Note: uses linear interpolation in mu direction. */
+// Evaluate f(P,mu,E) using linear interpolation in mu
 double pdflin(const double pphi, const double mu, const double ke, spline3d *data)
 {
-  double mean=0.0, oldmean=0.0, factor0, pdf0, pdf1;
-  int    mbin, pcoef, pstart;
+  double midpt, factor;
+  int    mbin, endflg=0;
 
-  /* Find the mu bin containing this point */
-  for (mbin=0; mbin<data->nmubins; mbin++) {
-    mean = 0.5*(data->mubounds[mbin] + data->mubounds[mbin+1]);
-    if (mu < mean) break;
-    oldmean = mean;
-  }
-  if (mbin == data->nmubins) { /* Last half-bin: interp to 0 at upper bndry */
-    factor0 = (data->mubounds[mbin] - mu)/(data->mubounds[mbin] - mean);
-    if (factor0 < 0.0) factor0 = 0.0;
-    pdf1 = 0.0;
-  } else { /* Not last bin */
-    /* Construct the vector of pphi coefficients here */
-    pstart = getnzstart(data->pespline[mbin].pspline, pphi);
-    for (pcoef=pstart; pcoef<pstart+4; pcoef++)
-      getsplineval(&(data->pespline[mbin].kspline[pcoef]), ke,
-		   &(data->pespline[mbin].pspline->coefs[pcoef]));
+  // Find the mu bin containing this point
+  mbin = mubin(data, mu);
+  if ((mbin < 0) || (mbin >= data->nmubins)) return 0.0; // out of range!
 
-    /* Interpolate to get pdf val */
-    getsplineval(data->pespline[mbin].pspline, pphi, &pdf1);
+  // Determine which two bins will be averaged, interpolation factor
+  midpt = 0.5*(data->mubounds[mbin] + data->mubounds[mbin+1]);
+  factor = 1.0 - 0.5*(mu - midpt)/(data->mubounds[mbin+1] - midpt);
+  if (factor > 1.0) { factor -= 1.0;  mbin--;}
 
-    if (!mbin) { /* 1st half-bin: do not interpolate */
-      if (pdf1 < 0.0) return 0.0;
-      return data->norm*pdf1;
-    }
+  // Special cases at ends
+  if (mbin < 0) { endflg=1;  mbin=0;}
+  else if (mbin >= data->nmubins-1) { endflg=1;  mbin = data->nmubins-1;}
+  if (endflg) return data->norm*pdf2d(data->pespline + mbin, pphi, ke, data->logbins);
 
-    factor0 = (mean - mu)/(mean - oldmean);
-  }
-
-  /* Construct the vector of pphi coefficients here */
-  pstart = getnzstart(data->pespline[mbin-1].pspline, pphi);
-  for (pcoef=pstart; pcoef<pstart+4; pcoef++)
-    getsplineval(&(data->pespline[mbin-1].kspline[pcoef]), ke,
-		 &(data->pespline[mbin-1].pspline->coefs[pcoef]));
-
-  /* Interpolate to get pdf val */
-  getsplineval(data->pespline[mbin-1].pspline, pphi, &pdf0);
-
-  pdf1 = factor0*pdf0 + (1.0 - factor0)*pdf1;
-  if (pdf1 < 0.0) return 0.0;
-  return data->norm*pdf1;
+  // General case
+  return data->norm*(factor*pdf2d(data->pespline + mbin, pphi, ke, data->logbins) +
+		     (1.0-factor)*pdf2d(data->pespline + mbin+1, pphi, ke, data->logbins));
 }
 
 /******************************************************************************/
-/* Note: uses linear interpolation in mu direction. */
+// Evaluate f(P,mu,E), df/dP, df/dE using linear interpolation in mu
 double pdflinder(const double pphi, const double mu, const double ke, double *derivs,
 		 spline3d *data)
 {
-  double ys[2];
-  double mean=0.0, oldmean=0.0, factor0, pdf0, ddk0, ddp0, pdf1;
-  int    mbin, pcoef, pstart;
+  double midpt, factor, fn1, fn2, tmp[2];
+  int    mbin, endflg=0;
 
-  /* Find the mu bin containing this point */
-  for (mbin=0; mbin<data->nmubins; mbin++) {
-    mean = 0.5*(data->mubounds[mbin] + data->mubounds[mbin+1]);
-    if (mu < mean) break;
-    oldmean = mean;
-  }
-  if (mbin == data->nmubins) {
-    factor0 = (data->mubounds[mbin] - mu)/(data->mubounds[mbin] - mean);
-    if (factor0 < 0.0) factor0 = 0.0;
-    pdf1 = 0.0;
-  } else {
-    factor0 = (mean - mu)/(mean - oldmean);
+  // Find the mu bin containing this point
+  mbin = mubin(data, mu);
+  if ((mbin < 0) || (mbin >= data->nmubins)) // out of range!
+    return derivs[0] = derivs[1] = 0.0;
 
-    /* Construct the vector of pphi, pphi-prime coefficients here */
-    pstart = getnzstart(data->pespline[mbin].pspline, pphi);
-    for (pcoef=pstart; pcoef<pstart+4; pcoef++) {
-      getsplinederiv(&(data->pespline[mbin].kspline[pcoef]), ke, ys);
-      data->pespline[mbin].pspline->coefs[pcoef] = *ys;
-      data->pespline[mbin].ddkspline->coefs[pcoef] = ys[1];
-    }
+  // Determine which two bins will be averaged, interpolation factor
+  midpt = 0.5*(data->mubounds[mbin] + data->mubounds[mbin+1]);
+  factor = 1.0 - 0.5*(mu - midpt)/(data->mubounds[mbin+1] - midpt);
+  if (factor > 1.0) { factor -= 1.0;  mbin--;}
 
-    /* Interpolate to get pdf, deriv vals */
-    getsplinederiv(data->pespline[mbin].pspline, pphi, ys);
-    pdf1 = *ys;  *derivs = ys[1];
-    getsplineval(data->pespline[mbin].ddkspline, pphi, derivs+1);
-
-    if (!mbin) {
-      if (pdf1 < 0.0) return *derivs = derivs[1] = 0.0;
-      derivs[0] *= data->norm;  derivs[1] *= data->norm;
-      return data->norm*pdf1;
-    }
+  // Special cases at ends
+  if (mbin < 0) { endflg=1;  mbin=0;}
+  else if (mbin >= data->nmubins-1) { endflg=1;  mbin = data->nmubins-1;}
+  if (endflg) {
+    fn1 = pdf2dder(data->pespline + mbin, pphi, ke, data->logbins, derivs);
+    derivs[0] *= data->norm;  derivs[1] *= data->norm;
+    return data->norm*fn1;
   }
 
-  /* Construct the vector of pphi, pphi-prime coefficients here */
-  pstart = getnzstart(data->pespline[mbin-1].pspline, pphi);
-  for (pcoef=pstart; pcoef<pstart+4; pcoef++) {
-    getsplinederiv(&(data->pespline[mbin-1].kspline[pcoef]), ke, ys);
-    data->pespline[mbin-1].pspline->coefs[pcoef] = *ys;
-    data->pespline[mbin-1].ddkspline->coefs[pcoef] = ys[1];
-  }
-
-  /* Interpolate to get pdf, deriv vals */
-  getsplinederiv(data->pespline[mbin-1].pspline, pphi, ys);
-  pdf0 = *ys;  ddp0 = ys[1];
-  getsplineval(data->pespline[mbin-1].ddkspline, pphi, &ddk0);
-
-  *derivs = factor0*ddp0 + (1.0 - factor0)*(*derivs);
-  derivs[1] = factor0*ddk0 + (1.0 - factor0)*derivs[1];
-  pdf1 = factor0*pdf0 + (1.0 - factor0)*pdf1;
-  if (pdf1 < 0.0) return *derivs = derivs[1] = 0.0;
-  derivs[0] *= data->norm;  derivs[1] *= data->norm;
-  return data->norm*pdf1;
+  // General case
+  fn1 = pdf2dder(data->pespline + mbin,   pphi, ke, data->logbins, derivs);
+  fn2 = pdf2dder(data->pespline + mbin+1, pphi, ke, data->logbins, tmp);
+  derivs[0] = data->norm*(factor*derivs[0] + (1.0-factor)*tmp[0]);
+  derivs[1] = data->norm*(factor*derivs[1] + (1.0-factor)*tmp[1]);
+  return data->norm*(factor*fn1 + (1.0-factor)*fn2);
 }
-#endif
 
 /******************************************************************************/
 double integratedV(spline3d *data,
@@ -515,7 +526,7 @@ double integratedV(spline3d *data,
   for (im=0; im<nm; im++, mu+=dm)
     for (ip=0, pp=pi; ip<np; ip++, pp+=dp)
       for (ik=0, ke=ki; ik<nk; ik++, ke+=dk)
-	sum += PDFFN(pp, mu, ke, data);
+	sum += pdfnn(pp, mu, ke, data);
 
   return dm*dp*dk*sum;
 }
