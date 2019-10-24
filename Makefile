@@ -32,8 +32,14 @@ testEsplines: testEsplines.f90 spline_interface.o particleSplines.o
 	spline_interface.o particleSplines.o \
 	-L${GSL_HOME}/lib -lgsl -lgslcblas -lm
 
+spline_interface.o: spline_interface.c spline_interface.h
+	$(CC) -c $(CFLAGS) $(INCLUDES) -o $@ $<
+
+particleSplines.o: particleSplines.c particleSplines.h spline_interface.h
+	$(CC) -c $(CFLAGS) $(INCLUDES) -o $@ $<
+
 %.o: %.c
-	$(CC) -c $(CFLAGS) $(INCLUDES) -o $@ $< 
+	$(CC) -c $(CFLAGS) $(INCLUDES) -o $@ $<
 
 %.o: %.f90
 	$(FC) -c $(FFLAGS) $(F90MODS) $(INCLUDES) -o $@ $<
