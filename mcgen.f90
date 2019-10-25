@@ -126,7 +126,7 @@ SUBROUTINE writejac(froot, nparts, Rmin, Rmax, zmin, zmax, &
 
   REAL(KIND=rspec), ALLOCATABLE, DIMENSION(:) :: pphi, mu, Etot
   REAL(KIND=rspec) buffer(3)
-  REAL(KIND=rspec) zh, dz, rh, modB, vlh, dvl, vph, bphi
+  REAL(KIND=rspec) zh, dz, rh, modB, vlh, dvl, bphi
   REAL(KIND=rspec) mot, pmag, tmp
   REAL(KIND=rspec) rhs, drs, vphs, psi_lcfs, psiw
   REAL x
@@ -161,10 +161,6 @@ SUBROUTINE writejac(froot, nparts, Rmin, Rmax, zmin, zmax, &
   PRINT *,'B_phi_axis = ',tmp
   psiw = ioncharge*psi_lcfs
 
-  ! Create output file
-  !OPEN(9, FILE=TRIM(froot)//'_jac.txt', STATUS='REPLACE', ACTION='WRITE')
-  !WRITE(9,*) 'P_phi (kg m^2/s)  mu (amp.m^2)   Energy (J)  sgn(v||)'
-
   ! NetCDF
   ierr = nf90_create(TRIM(froot)//'_jacobian.cdf', NF90_CLOBBER, ncid)
   IF (ierr.NE.NF90_NOERR) THEN
@@ -187,14 +183,17 @@ SUBROUTINE writejac(froot, nparts, Rmin, Rmax, zmin, zmax, &
 
   ALLOCATE(pphi(nfbufsize), mu(nfbufsize), Etot(nfbufsize), isv(nfbufsize))
 
+  ! Initialize counters
   CALL RANDOM_SEED(SIZE=minseed)
-  PRINT *,'Min random seed len = ',minseed
+  !PRINT *,'Min random seed len = ',minseed
   ALLOCATE(seed(minseed))
   seed = 1
   CALL RANDOM_SEED(PUT=seed)
   ipart = 0; jbuf = 1; iplast = 0
   strt = (/ 1, 1 /);  cnt = (/ 1, nfbufsize /)
-  PRINT *,'I/O buffer size = ',nfbufsize
+  WRITE(*,'(A,I7)')' I/O buffer size =',nfbufsize
+
+  ! Main loop
   PRINT *,'Generating',nparts,'random particles within LCFS...'
   DO
      !Choose random real space coordinates
@@ -212,7 +211,6 @@ SUBROUTINE writejac(froot, nparts, Rmin, Rmax, zmin, zmax, &
      !Choose random velocity space coordinates
      CALL RANDOM_NUMBER(x)
      vphs = x*vpsmax
-     vph = SQRT(vphs)
      CALL RANDOM_NUMBER(x)
      vlh = vlmin + x*dvl
 
@@ -237,8 +235,7 @@ SUBROUTINE writejac(froot, nparts, Rmin, Rmax, zmin, zmax, &
      jbuf = jbuf + 1;  ipart = ipart + 1
      IF ((jbuf.GT.nfbufsize).OR.(ipart.GE.nparts)) THEN
         cnt(2) = jbuf - 1
-        IF (cnt(2).GT.0) THEN
-           !Flush buffer to NetCDF
+        IF (cnt(2).GT.0) THEN !Flush buffer to NetCDF file
            ierr = nf90_put_var(ncid, ppid, pphi, start=strt, count=cnt)
            ierr = nf90_put_var(ncid, muid, mu,   start=strt, count=cnt)
            ierr = nf90_put_var(ncid, Eid,  Etot, start=strt, count=cnt)
@@ -261,8 +258,6 @@ SUBROUTINE writejac(froot, nparts, Rmin, Rmax, zmin, zmax, &
   PRINT *,strt(2)-1,' total particles written.'
 
   DEALLOCATE(pphi, mu, Etot, isv, seed)
-
-  !CLOSE(9)
   ierr = nf90_close(ncid)
 END SUBROUTINE writejac
 
