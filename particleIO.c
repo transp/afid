@@ -118,10 +118,10 @@ int mcompar(const void *f1, const void *f2)
 
   if (s1==s2) {
     mu1 = ((vvect *)f1)->mu;  mu2 = ((vvect *)f2)->mu;
-    //if (mu1 < mu2) return -1;
-    //if (mu1 > mu2) return 1;
-    //return 0;
-    return (mu1 > mu2) - (mu1 < mu2);
+    if (mu1 < mu2) return -1;
+    if (mu1 > mu2) return 1;
+    return 0;
+    //return (mu1 > mu2) - (mu1 < mu2);
   }
 
   return s1-s2;
