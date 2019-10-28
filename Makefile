@@ -21,8 +21,9 @@ L_TRANSP = -L$(NTCCHOME)/lib \
 L_NETCDF  = -L$(NETCDFHOME)/lib -lnetcdf -lnetcdff
 L_MDSPLUS = -L$(MDSPLUS_DIR)/lib -lMdsLib
 
-fitjac: fitjac.c spline_interface.o
-	$(CC) $(CFLAGS) -o $@ $< spline_interface.o -L${GSL_HOME}/lib -lgsl -lgslcblas -L${NETCDFC_HOME}/lib -lnetcdf -lm
+fitjac: fitjac.c particleIO.o spline_interface.o
+	$(CC) $(CFLAGS) -o $@ $< particleIO.o spline_interface.o \
+	-L${GSL_HOME}/lib -lgsl -lgslcblas -L${NETCDFC_HOME}/lib -lnetcdf -lm
 
 condense: condense.c
 	$(CC) $(CFLAGS) -o $@ $< -L${NETCDFC_HOME}/lib -lnetcdf
@@ -42,12 +43,12 @@ particleSplines.o: particleSplines.c particleSplines.h spline_interface.h
 	$(CC) -c $(CFLAGS) $(INCLUDES) -o $@ $<
 
 %.o: %.f90
-	$(FC) -c $(FFLAGS) $(F90MODS) $(INCLUDES) -o $@ $<
+	$(FC) -c -fopenmp $(FFLAGS) $(F90MODS) $(INCLUDES) -o $@ $<
 
 all:  $(EXE)
 
 mcgen: mcgen.o
-	$(FC) -o $@ $< $(L_TRANSP) $(L_NETCDF) $(L_LAPACK) $(L_MDSPLUS)
+	$(FC) -o $@ -fopenmp $< $(L_TRANSP) $(L_NETCDF) $(L_LAPACK) $(L_MDSPLUS)
 
 
 clean:
