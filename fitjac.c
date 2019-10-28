@@ -31,7 +31,7 @@ int main(int argc, char *argv[])
   int     nparts, njac, nmubins=25, i, j, k, nkbins, npbins, npcoefs, nkcoefs;
   int     binstart, binstop, jbinstart, jbinstop, ko, kocount=0, lbound, jlbound;
   int     lmin=0, lmax, jlmin=0, jlmax, mu_eqpart=1, ppbin=40, minbins=7, debug_flag=0;
-  int     logbins=0, nzero, koflag=0, bincount=0, mincoefs=6;
+  int     logbins=0, nzero, koflag=0, bincount=0, mincoefs=6, csorted, jsorted;
 
   /* If there are no arguments, print a usage message. */
   if (argc==1) {
@@ -119,17 +119,19 @@ int main(int argc, char *argv[])
 
   /* Read all particle data from file */
   sprintf(inname, "%s_condensed.cdf", argv[1]);
-  readdata(inname, &particle, &nparts);
-  printf("%d particles read; last = %le\t%le\t%le\t%d\n", nparts,
+  readParticleData(inname, &particle, &nparts, &csorted);
+  printf("%d%s particles read; last = %le\t%le\t%le\t%d\n", nparts,
+	 (csorted) ? " sorted" : "",
 	 particle[nparts-1].pphi, particle[nparts-1].mu, particle[nparts-1].ke,
 	 particle[nparts-1].sig);
 
   /* Read all jacobian data from file */
   sprintf(inname, "%s_jacobian.cdf", argv[1]);
-  readdata(inname, &jacobian, &njac);
-  printf("%d particles read; last = %le\t%le\t%le\t%d\n", njac,
-	 jacobian[nparts-1].pphi, jacobian[nparts-1].mu, jacobian[nparts-1].ke,
-	 jacobian[nparts-1].sig);
+  readParticleData(inname, &jacobian, &njac, &jsorted);
+  printf("%d%s particles read; last = %le\t%le\t%le\t%d\n", njac,
+	 (jsorted) ? " sorted" : "",
+	 jacobian[njac-1].pphi, jacobian[njac-1].mu, jacobian[njac-1].ke,
+	 jacobian[njac-1].sig);
 
   /* Calculate cmin (minimum ratio of ke to mu), emax */
   cmin = particle[0].ke / particle[0].mu;  emax = particle[0].ke;
@@ -141,12 +143,16 @@ int main(int argc, char *argv[])
   printf("cmin = %lf; emax = %le\n", cmin, emax);
 
   /* Sort the particles by sign of v||, increasing magnetic moment mu */
-  fputs("Sorting by lambda, magnetic moment...\n", stderr);
-  qsort(particle, nparts, sizeof(vvect), mcompar);
+  if (!csorted) {
+    fputs("Sorting by lambda, magnetic moment...\n", stderr);
+    qsort(particle, nparts, sizeof(vvect), mcompar);
+  }
   lmax = lbound = getlbound(particle, nparts);
   printf("%d condensed particles have l<0 (%.1lf %%).\n", lbound, 100.0*lbound/nparts);
-  fputs("Sorting Jacobian...\n", stderr);
-  qsort(jacobian, njac, sizeof(vvect), mcompar);
+  if (!jsorted) {
+    fputs("Sorting Jacobian...\n", stderr);
+    qsort(jacobian, njac, sizeof(vvect), mcompar);
+  }
   jlmax = jlbound = getlbound(jacobian, njac);
   printf("%d Jacobian particles have l<0 (%.1lf %%).\n", jlbound, 100.0*jlbound/njac);
 

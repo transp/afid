@@ -6,7 +6,8 @@ typedef struct {
   int    sig;
 } vvect;
 
-void readdata(const char *, vvect **, int *);
+void readParticleData(const char *, vvect **, int *, int *);
+void overwriteParticleData(const char *, vvect *, const int);
 int mcompar(const void *, const void *);
 
 #endif

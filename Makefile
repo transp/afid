@@ -1,5 +1,5 @@
 # source ./modules to set up module environment for build
-EXE = condense mcgen fitjac testEsplines
+EXE = condense mcgen fitjac testEsplines particle_sort
 
 # GNU compiler options
 FC = gfortran
@@ -32,6 +32,9 @@ testEsplines: testEsplines.f90 spline_interface.o particleSplines.o
 	$(FC) $(FFLAGS) testEsplines.f90 -o $@ \
 	spline_interface.o particleSplines.o \
 	-L${GSL_HOME}/lib -lgsl -lgslcblas -lm
+
+particle_sort: particle_sort.c particleIO.o
+	$(CC) $(CFLAGS) -o $@ $< particleIO.o -L${NETCDFC_HOME}/lib -lnetcdf
 
 spline_interface.o: spline_interface.c spline_interface.h
 	$(CC) -c $(CFLAGS) $(INCLUDES) -o $@ $<

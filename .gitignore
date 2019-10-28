@@ -6,6 +6,7 @@ condense
 fitjac
 mcgen
 testEsplines
+particle_sort
 mcgen.in
 pdist[0-]1.spl
 mucoarse[0-]1_[0-9]*

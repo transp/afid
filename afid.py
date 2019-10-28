@@ -15,6 +15,7 @@ if len(argv) > 1:
     cfilename = jobid+"_condensed.cdf"
     if not os.access(cfilename, os.R_OK):
         os.system("condense "+jobid)
+        os.system("particle_sort "+cfilename)
 
     # Construct Jacobian by extensively sampling NUBEAM distribution.
     # Needs state data and condensed output from previous command.
@@ -27,6 +28,7 @@ if len(argv) > 1:
             file_object.write("&strings froot='"+jobid+"' /\n")
             file_object.write("&params nparts="+str(npjac)+" /\n")
         os.system("mcgen")
+        os.system("particle_sort "+jfilename)
 
     # Fit splines to the generated distributions.
     # Needs condensed particle data and jacobian from two prior commands.
