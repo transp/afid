@@ -6,8 +6,16 @@ PROGRAM mcgen
   REAL(KIND=rspec) e_C, m_kg
   REAL(KIND=rspec) vmax,vlel_min,vlel_max,vps_max
   INTEGER :: nparts, ierr
+  INTEGER :: nprocs, nthreads, OMP_GET_NUM_PROCS, OMP_GET_NUM_THREADS
   NAMELIST /strings/ froot
   NAMELIST /params/ nparts
+
+!$OMP PARALLEL DEFAULT(SHARED)
+  nthreads = OMP_GET_NUM_THREADS()
+  nprocs = OMP_GET_NUM_PROCS()
+!$OMP END PARALLEL
+  WRITE(0,'(A,I3,A,I4,A)') &
+       'mcgen running on',nthreads,' thread(s),',nprocs,' proc(s).'
 
   !Get file root from namelist
   OPEN(8, FILE="mcgen.in", STATUS="OLD", ACTION="READ")
@@ -36,11 +44,18 @@ PROGRAM mcgen
   !Perform sanity check
   CALL sanity(froot, e_C, m_kg)
 
-  CALL writejac(froot, nparts, &
-       ps%R_min_lcfs,ps%R_max_lcfs,ps%Z_min_lcfs,ps%Z_max_lcfs,&
-       vlel_min,vlel_max,vps_max,&
-       e_C,m_kg)
-
+  !Generate Jacobian
+  IF (nthreads.LT.2) THEN
+     CALL writejac(froot, nparts, &
+          ps%R_min_lcfs,ps%R_max_lcfs,ps%Z_min_lcfs,ps%Z_max_lcfs,&
+          vlel_min,vlel_max,vps_max,&
+          e_C,m_kg)
+  ELSE
+     CALL writejac_sync(froot, nparts, nthreads, &
+          ps%R_min_lcfs,ps%R_max_lcfs,ps%Z_min_lcfs,ps%Z_max_lcfs,&
+          vlel_min,vlel_max,vps_max,&
+          e_C,m_kg)
+  ENDIF
 END PROGRAM mcgen
 
 !--------------------------------------------------------------------
@@ -109,8 +124,7 @@ END SUBROUTINE ckerr
 !Compute a particle distribution that is uniform in x,v to get
 ! numerical Jacobian.
 SUBROUTINE writejac(froot, nparts, Rmin, Rmax, zmin, zmax, &
-     vlmin, vlmax, vpsmax, &
-     ioncharge, ionmass)
+     vlmin, vlmax, vpsmax, ioncharge, ionmass)
   USE plasma_state_mod
   USE netcdf
   IMPLICIT NONE
@@ -122,7 +136,7 @@ SUBROUTINE writejac(froot, nparts, Rmin, Rmax, zmin, zmax, &
   REAL(KIND=rspec), INTENT(IN) :: vlmin, vlmax, vpsmax
   REAL(KIND=rspec), INTENT(IN) :: ioncharge, ionmass
 
-  INTEGER, PARAMETER :: nfbufsize = 128, interval = 250000
+  INTEGER, PARAMETER :: nfbufsize = 16384, interval = 250000
 
   REAL(KIND=rspec), ALLOCATABLE, DIMENSION(:) :: pphi, mu, Etot
   REAL(KIND=rspec) buffer(3)
@@ -206,7 +220,7 @@ SUBROUTINE writejac(froot, nparts, Rmin, Rmax, zmin, zmax, &
      !Determine if it falls within the lcfs
      CALL ps_intrp_2d(rh, zh, ps%id_PsiRZ, pmag, ierr)
      CALL ckerr(ierr,'ps_intrp_2d')
-     IF (pmag.GT.psi_lcfs) ipart = ipart - 1
+     IF (pmag.LE.psi_lcfs) ipart = ipart + 1
 
      !Choose random velocity space coordinates
      CALL RANDOM_NUMBER(x)
@@ -232,9 +246,8 @@ SUBROUTINE writejac(froot, nparts, Rmin, Rmax, zmin, zmax, &
         isv(jbuf) = -1
      ENDIF
 
-     jbuf = jbuf + 1;  ipart = ipart + 1
-     IF ((jbuf.GT.nfbufsize).OR.(ipart.GE.nparts)) THEN
-        cnt(2) = jbuf - 1
+     IF ((jbuf.EQ.nfbufsize).OR.(ipart.GE.nparts)) THEN
+        cnt(2) = jbuf
         IF (cnt(2).GT.0) THEN !Flush buffer to NetCDF file
            ierr = nf90_put_var(ncid, ppid, pphi, start=strt, count=cnt)
            ierr = nf90_put_var(ncid, muid, mu,   start=strt, count=cnt)
@@ -244,9 +257,10 @@ SUBROUTINE writejac(froot, nparts, Rmin, Rmax, zmin, zmax, &
            ierr = nf90_put_var(ncid, wtid, Etot, start=strt, count=cnt)
            IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
            strt(2) = strt(2) + cnt(2)
-           jbuf = 1
+           jbuf = 0
         ENDIF
      ENDIF
+     jbuf = jbuf + 1
 
      IF (MOD(ipart,interval).EQ.0) THEN
         IF (ipart.NE.iplast) PRINT *,ipart
@@ -260,6 +274,164 @@ SUBROUTINE writejac(froot, nparts, Rmin, Rmax, zmin, zmax, &
   DEALLOCATE(pphi, mu, Etot, isv, seed)
   ierr = nf90_close(ncid)
 END SUBROUTINE writejac
+
+!--------------------------------------------------------------------
+!Compute a particle distribution that is uniform in x,v to get
+! numerical Jacobian.
+SUBROUTINE writejac_sync(froot, nparts, nthreads, &
+                         Rmin, Rmax, zmin, zmax, &
+                         vlmin, vlmax, vpsmax, ioncharge, ionmass)
+  USE plasma_state_mod
+  USE netcdf
+  IMPLICIT NONE
+  INTRINSIC SQRT, TRIM
+
+  CHARACTER*96, INTENT(IN)     :: froot
+  INTEGER, INTENT(IN)          :: nparts, nthreads
+  REAL(KIND=rspec), INTENT(IN) :: Rmin, Rmax, zmin, zmax
+  REAL(KIND=rspec), INTENT(IN) :: vlmin, vlmax, vpsmax
+  REAL(KIND=rspec), INTENT(IN) :: ioncharge, ionmass
+
+  INTEGER, PARAMETER :: nfbufsize = 16384, interval = 250000
+
+  REAL(KIND=rspec), ALLOCATABLE, DIMENSION(:) :: pphi, mu, Etot
+  REAL(KIND=rspec) buffer(3)
+  REAL(KIND=rspec) zh, dz, rh, modB, vlh, dvl, bphi
+  REAL(KIND=rspec) mot, pmag, tmp
+  REAL(KIND=rspec) rhs, drs, vphs, psi_lcfs, psiw
+  REAL x
+  INTEGER ids(3), dimids(2), strt(2), cnt(2)
+  INTEGER ierr, ipart, jbuf, minseed, iplast, lparts
+  INTEGER ncid, ptcdim, specdim, ppid, muid, Eid, wtid, lid
+  INTEGER, DIMENSION(:), ALLOCATABLE :: isv, seed
+
+  PRINT *,'STARTING JAC'
+
+  ids(1) = ps%id_BRRZ
+  ids(2) = ps%id_BZRZ
+  ids(3) = ps%id_BphiRZ
+
+  dz = zmax - zmin
+  drs = Rmax**2 - Rmin**2
+  dvl = vlmax - vlmin
+  mot = 0.5*ionmass
+
+  ! Get max flux (at lcfs)
+  CALL ps_intrp_2d(ps%R_min_lcfs, ps%z_axis, ps%id_PsiRZ, tmp, ierr)
+  CALL ckerr(ierr,'ps_intrp_2d')
+  CALL ps_intrp_2d(ps%R_max_lcfs, ps%z_axis, ps%id_PsiRZ, psi_lcfs, ierr)
+  CALL ckerr(ierr,'ps_intrp_2d')
+  IF (tmp.GT.psi_lcfs) psi_lcfs = tmp
+  PRINT *,'psi_lcfs = ',psi_lcfs
+  CALL ps_intrp_2d(ps%R_axis, ps%z_axis, ps%id_PsiRZ, tmp, ierr)
+  CALL ckerr(ierr,'ps_intrp_2d')
+  PRINT *,'psi_axis = ',tmp
+  CALL ps_intrp_2d(ps%R_axis, ps%z_axis, ps%id_BphiRZ, tmp, ierr)
+  CALL ckerr(ierr,'ps_intrp_2d')
+  PRINT *,'B_phi_axis = ',tmp
+  psiw = ioncharge*psi_lcfs
+
+  ! NetCDF
+  ierr = nf90_create(TRIM(froot)//'_jacobian.cdf', NF90_CLOBBER, ncid)
+  IF (ierr.NE.NF90_NOERR) THEN
+     PRINT *,TRIM(nf90_strerror(ierr))
+     STOP "Stopped"
+  ENDIF
+  ierr = nf90_def_dim(ncid, 'nptcl', NF90_UNLIMITED, ptcdim)
+  ierr = nf90_def_dim(ncid, 'nspec', 1, specdim)
+  dimids(1) = specdim;  dimids(2) = ptcdim
+  ierr = nf90_def_var(ncid, 'pphi', NF90_DOUBLE, dimids, ppid)
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
+  ierr = nf90_put_att(ncid, ppid, 'units', 'kg m^2/s')
+  ierr = nf90_def_var(ncid, 'mu', NF90_DOUBLE, dimids, muid)
+  ierr = nf90_put_att(ncid, muid, 'units', 'A m^2')
+  ierr = nf90_def_var(ncid, 'E', NF90_DOUBLE, dimids, Eid)
+  ierr = nf90_put_att(ncid, Eid, 'units', 'J')
+  ierr = nf90_def_var(ncid, 'weight', NF90_DOUBLE, dimids, wtid)
+  ierr = nf90_def_var(ncid, 'sgn_v', NF90_BYTE, dimids, lid)
+  ierr = nf90_enddef(ncid)
+
+  ALLOCATE(pphi(nfbufsize), mu(nfbufsize), Etot(nfbufsize), isv(nfbufsize))
+
+  ! Initialize counters
+  CALL RANDOM_SEED(SIZE=minseed)
+  !PRINT *,'Min random seed len = ',minseed
+  ALLOCATE(seed(minseed))
+  seed = 1
+  CALL RANDOM_SEED(PUT=seed)
+  ipart = 0;  iplast = 0
+  strt = (/ 1, 1 /);  cnt = (/ 1, nfbufsize /)
+  WRITE(*,'(A,I7)')' I/O buffer size =',nfbufsize
+
+  ! Main loop
+  PRINT *,'Generating',nparts,'random particles within LCFS...'
+  DO
+     lparts =0
+!$OMP PARALLEL DO DEFAULT(SHARED) &
+!$OMP             PRIVATE(seed, x, zh, rhs, rh, pmag, ierr, vphs, vlh, buffer, modB, bphi) &
+!$OMP             SCHEDULE(GUIDED, nfbufsize/nthreads) &
+!$OMP             REDUCTION(+:lparts)
+     DO jbuf=1,nfbufsize
+        !Choose random real space coordinates
+        CALL RANDOM_NUMBER(x)
+        zh = zmin + x*dz
+        CALL RANDOM_NUMBER(x)
+        rhs = Rmin**2 + x*drs
+        rh = SQRT(rhs)
+
+        !Determine if it falls within the lcfs
+        CALL ps_intrp_2d(rh, zh, ps%id_PsiRZ, pmag, ierr)
+        CALL ckerr(ierr,'ps_intrp_2d')
+        IF (pmag.LE.psi_lcfs) lparts = lparts + 1
+
+        !Choose random velocity space coordinates
+        CALL RANDOM_NUMBER(x)
+        vphs = x*vpsmax
+        CALL RANDOM_NUMBER(x)
+        vlh = vlmin + x*dvl
+
+        !Convert to constants of motion
+        CALL ps_intrp_2d(rh, zh, ids, buffer, ierr) !Retrieve magnetic field
+        CALL ckerr(ierr,'ps_intrp_2d')
+        modB = SQRT(buffer(1)**2 + buffer(2)**2 + buffer(3)**2)
+        bphi = buffer(3)/modB
+
+        Etot(jbuf) = mot*(vphs + vlh**2)
+        mu(jbuf) = mot*vphs/modB
+        pphi(jbuf) = ioncharge*pmag - ionmass*rh*vlh*bphi  !J.B. sign of vlh term
+
+        !Classify orbit
+        if (vlh.GT.0.0) THEN
+           isv(jbuf) = 1
+        ELSE
+           isv(jbuf) = -1
+        ENDIF
+     ENDDO !jbuf
+!$OMP END PARALLEL DO
+
+     ! Flush buffers to NetCDF file
+     ierr = nf90_put_var(ncid, ppid, pphi, start=strt, count=cnt)
+     ierr = nf90_put_var(ncid, muid, mu,   start=strt, count=cnt)
+     ierr = nf90_put_var(ncid, Eid,  Etot, start=strt, count=cnt)
+     ierr = nf90_put_var(ncid, lid,  isv,  start=strt, count=cnt)
+     Etot(1:cnt(2)) = 1.0
+     ierr = nf90_put_var(ncid, wtid, Etot, start=strt, count=cnt)
+     IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
+     strt(2) = strt(2) + cnt(2)
+
+     ipart = ipart + lparts
+     IF (ipart/interval .GT. iplast) THEN
+        iplast = ipart/interval
+        PRINT *,iplast*interval,'/',strt(2)-1
+     ENDIF
+
+     IF (ipart.GE.nparts) EXIT
+  END DO
+  PRINT *,strt(2)-1,' total particles written.'
+
+  DEALLOCATE(pphi, mu, Etot, isv, seed)
+  ierr = nf90_close(ncid)
+END SUBROUTINE writejac_sync
 
 !--------------------------------------------------------------------
 SUBROUTINE sanity(froot, ioncharge, ionmass)
