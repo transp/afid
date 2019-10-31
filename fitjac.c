@@ -119,17 +119,17 @@ int main(int argc, char *argv[])
 
   /* Read all particle data from file */
   sprintf(inname, "%s_condensed.cdf", argv[1]);
-  readParticleData(inname, &particle, &nparts, &csorted);
-  printf("%d%s particles read; last = %le\t%le\t%le\t%d\n", nparts,
-	 (csorted) ? " sorted" : "",
+  readParticleData(inname, &particle, &nparts, &csorted, 0);
+  printf("%d %ssorted particles read; last = %le\t%le\t%le\t%d\n", nparts,
+	 (csorted) ? "" : "un",
 	 particle[nparts-1].pphi, particle[nparts-1].mu, particle[nparts-1].ke,
 	 particle[nparts-1].sig);
 
   /* Read all jacobian data from file */
   sprintf(inname, "%s_jacobian.cdf", argv[1]);
-  readParticleData(inname, &jacobian, &njac, &jsorted);
-  printf("%d%s particles read; last = %le\t%le\t%le\t%d\n", njac,
-	 (jsorted) ? " sorted" : "",
+  readParticleData(inname, &jacobian, &njac, &jsorted, 0);
+  printf("%d %ssorted particles read; last = %le\t%le\t%le\t%d\n", njac,
+	 (jsorted) ? "" : "un",
 	 jacobian[njac-1].pphi, jacobian[njac-1].mu, jacobian[njac-1].ke,
 	 jacobian[njac-1].sig);
 

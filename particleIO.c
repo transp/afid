@@ -6,7 +6,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 // readParticleData: Read particle constants-of-motion data from a NetCDF file.
 ////////////////////////////////////////////////////////////////////////////////
-void readParticleData(const char *fname, vvect **p, int *np, int *sorted)
+void readParticleData(const char *fname, vvect **p, int *np, int *sorted,
+		      const int flags)
 {
   double *buffer;
   signed char   *sgnv;
@@ -26,6 +27,10 @@ void readParticleData(const char *fname, vvect **p, int *np, int *sorted)
   ierr = nc_inq_attid(ncid, NC_GLOBAL, "sorted", &srtid);
   if (ierr == NC_NOERR) // Attribute is present; read value...
     nc_get_att_int(ncid, NC_GLOBAL, "sorted", sorted);
+  if ((flags & PIO_SKIPSORT) && (*sorted)) {
+    ierr = nc_close(ncid);
+    return;
+  }
 
   /* Check for required variables */
   if ((ierr = nc_inq_varid(ncid, "pphi", &ppid)) != NC_NOERR) {
@@ -164,8 +169,8 @@ void overwriteParticleData(const char *fname, vvect *p, const int np)
   ierr = nc_inq_vardimid(ncid, ppid, dimids);
   ierr = nc_inq_dimlen(ncid, dimids[0], &len0);
   ierr = nc_inq_dimlen(ncid, dimids[1], &len1);
-  printf("%s contains %ld species, %ld particles\n", fname,
-	 (long)len1, (long)len0);
+  //printf("%s contains %ld species, %ld particles\n", fname,
+  //	 (long)len1, (long)len0);
   if (((int)len1 != 1) || ((int)len0 != np)) {
     fprintf(stderr, "Mismatch detected with 1-species %d-particle array!\n", np);
     exit(1);
@@ -178,6 +183,7 @@ void overwriteParticleData(const char *fname, vvect *p, const int np)
   }
 
   /* Write real data */
+  fprintf(stderr, "Writing %ld particles...\n", (long)len0);
   start[0] = start[1] = 0L;
   count[0] = len0;  count[1] = 1L;
   for (ip=0; ip<np; ip++) buffer[ip] = p[ip].pphi;
