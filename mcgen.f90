@@ -51,7 +51,7 @@ PROGRAM mcgen
           vlel_min,vlel_max,vps_max,&
           e_C,m_kg)
   ELSE
-     CALL writejac_sync(froot, nparts, nthreads, &
+     CALL writejac_omp(froot, nparts, nthreads, &
           ps%R_min_lcfs,ps%R_max_lcfs,ps%Z_min_lcfs,ps%Z_max_lcfs,&
           vlel_min,vlel_max,vps_max,&
           e_C,m_kg)
@@ -198,8 +198,7 @@ SUBROUTINE writejac(froot, nparts, Rmin, Rmax, zmin, zmax, &
   ALLOCATE(pphi(nfbufsize), mu(nfbufsize), Etot(nfbufsize), isv(nfbufsize))
 
   ! Initialize counters
-  CALL RANDOM_SEED(SIZE=minseed)
-  !PRINT *,'Min random seed len = ',minseed
+  CALL RANDOM_SEED(SIZE=minseed) !Returns minimum array length for random seed
   ALLOCATE(seed(minseed))
   seed = 1
   CALL RANDOM_SEED(PUT=seed)
@@ -262,12 +261,12 @@ SUBROUTINE writejac(froot, nparts, Rmin, Rmax, zmin, zmax, &
      ENDIF
      jbuf = jbuf + 1
 
+     IF (ipart.GE.nparts) EXIT
+
      IF (MOD(ipart,interval).EQ.0) THEN
         IF (ipart.NE.iplast) PRINT *,ipart
         iplast = ipart
      ENDIF
-
-     IF (ipart.GE.nparts) EXIT
   END DO
   PRINT *,strt(2)-1,' total particles written.'
 
@@ -278,9 +277,9 @@ END SUBROUTINE writejac
 !--------------------------------------------------------------------
 !Compute a particle distribution that is uniform in x,v to get
 ! numerical Jacobian.
-SUBROUTINE writejac_sync(froot, nparts, nthreads, &
-                         Rmin, Rmax, zmin, zmax, &
-                         vlmin, vlmax, vpsmax, ioncharge, ionmass)
+SUBROUTINE writejac_omp(froot, nparts, nthreads, &
+                        Rmin, Rmax, zmin, zmax, &
+                        vlmin, vlmax, vpsmax, ioncharge, ionmass)
   USE plasma_state_mod
   USE netcdf
   IMPLICIT NONE
@@ -292,20 +291,21 @@ SUBROUTINE writejac_sync(froot, nparts, nthreads, &
   REAL(KIND=rspec), INTENT(IN) :: vlmin, vlmax, vpsmax
   REAL(KIND=rspec), INTENT(IN) :: ioncharge, ionmass
 
-  INTEGER, PARAMETER :: nfbufsize = 16384, interval = 250000
+  REAL, PARAMETER    :: interval = 5.0 ! seconds
+  INTEGER, PARAMETER :: nfbufsize = 10080
 
   REAL(KIND=rspec), ALLOCATABLE, DIMENSION(:) :: pphi, mu, Etot
   REAL(KIND=rspec) buffer(3)
   REAL(KIND=rspec) zh, dz, rh, modB, vlh, dvl, bphi
   REAL(KIND=rspec) mot, pmag, tmp
   REAL(KIND=rspec) rhs, drs, vphs, psi_lcfs, psiw
-  REAL x
+  REAL x, lasttime, thistime
   INTEGER ids(3), dimids(2), strt(2), cnt(2)
-  INTEGER ierr, ipart, jbuf, minseed, iplast, lparts
+  INTEGER ierr, ipart, jbuf, minseed, lparts
   INTEGER ncid, ptcdim, specdim, ppid, muid, Eid, wtid, lid
   INTEGER, DIMENSION(:), ALLOCATABLE :: isv, seed
 
-  PRINT *,'STARTING JAC'
+  WRITE(*,'(A,I4,A)')'STARTING JAC_OMP WITH',nthreads,' THREADS'
 
   ids(1) = ps%id_BRRZ
   ids(2) = ps%id_BZRZ
@@ -355,16 +355,17 @@ SUBROUTINE writejac_sync(froot, nparts, nthreads, &
 
   ! Initialize counters
   CALL RANDOM_SEED(SIZE=minseed)
-  !PRINT *,'Min random seed len = ',minseed
   ALLOCATE(seed(minseed))
   seed = 1
   CALL RANDOM_SEED(PUT=seed)
-  ipart = 0;  iplast = 0
+  ipart = 0
   strt = (/ 1, 1 /);  cnt = (/ 1, nfbufsize /)
   WRITE(*,'(A,I7)')' I/O buffer size =',nfbufsize
 
   ! Main loop
   PRINT *,'Generating',nparts,'random particles within LCFS...'
+  PRINT *,' Inside     /     Total'
+  CALL cpu_time(lasttime)
   DO
      lparts =0
 !$OMP PARALLEL DO DEFAULT(SHARED) &
@@ -398,7 +399,7 @@ SUBROUTINE writejac_sync(froot, nparts, nthreads, &
 
         Etot(jbuf) = mot*(vphs + vlh**2)
         mu(jbuf) = mot*vphs/modB
-        pphi(jbuf) = ioncharge*pmag - ionmass*rh*vlh*bphi  !J.B. sign of vlh term
+        pphi(jbuf) = ioncharge*pmag - ionmass*rh*vlh*bphi
 
         !Classify orbit
         if (vlh.GT.0.0) THEN
@@ -420,18 +421,19 @@ SUBROUTINE writejac_sync(froot, nparts, nthreads, &
      strt(2) = strt(2) + cnt(2)
 
      ipart = ipart + lparts
-     IF (ipart/interval .GT. iplast) THEN
-        iplast = ipart/interval
-        PRINT *,iplast*interval,'/',strt(2)-1
-     ENDIF
-
      IF (ipart.GE.nparts) EXIT
+
+     CALL cpu_time(thistime)
+     IF (thistime - lasttime .GE. interval) THEN
+        PRINT *,ipart,'/',strt(2)-1
+        lasttime = thistime
+     ENDIF
   END DO
   PRINT *,strt(2)-1,' total particles written.'
 
   DEALLOCATE(pphi, mu, Etot, isv, seed)
   ierr = nf90_close(ncid)
-END SUBROUTINE writejac_sync
+END SUBROUTINE writejac_omp
 
 !--------------------------------------------------------------------
 SUBROUTINE sanity(froot, ioncharge, ionmass)
