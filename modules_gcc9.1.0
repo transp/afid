@@ -1,0 +1,15 @@
+module purge
+module load git
+module load gcc/9.1.0
+setenv NTCCHOME /p/xshare/NTCC/centos6.x86_64/gcc9.1.0
+module load szip
+module load hdf
+module load hdf5-serial
+module load curl
+module load netcdf-c
+setenv NETCDFC_HOME ${NETCDF_C_HOME}
+module load netcdf-fortran
+setenv NETCDFHOME ${NETCDF_FORTRAN_HOME}
+module load mdsplus/v6.1.84-matlab
+module load lapack
+module load gsl
