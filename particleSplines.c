@@ -179,6 +179,7 @@ int getdfde_(double *pphi, double *mu, double *ke, int *sgnv, double *f,
 	     double *dfdE)
 {
   spline3d *data;
+  double drv[2];
 
   data = (*sgnv > 0) ? psplinedata : nsplinedata;
 
@@ -186,9 +187,10 @@ int getdfde_(double *pphi, double *mu, double *ke, int *sgnv, double *f,
   case 0:
     *f = pdfnndE(*pphi, *mu, *ke, dfdE, data);
     break;
-    //case 1:
-    //*f = pdflinder(*pphi, *mu, *ke, drv, data);
-    //break;
+  case 1:
+    *f = pdflinder(*pphi, *mu, *ke, drv, data);
+    *dfdE = drv[1];
+    break;
   default:
     fprintf(stderr, "Unsupported interpolation order %d in getdfdE\n", data->iorder);
     *f = *dfdE = 0.0;
@@ -205,6 +207,7 @@ int getdfdp_(double *pphi, double *mu, double *ke, int *sgnv, double *f,
 	     double *dfdP)
 {
   spline3d *data;
+  double drv[2];
 
   data = (*sgnv > 0) ? psplinedata : nsplinedata;
 
@@ -212,9 +215,10 @@ int getdfdp_(double *pphi, double *mu, double *ke, int *sgnv, double *f,
   case 0:
     *f = pdfnndP(*pphi, *mu, *ke, dfdP, data);
     break;
-    //case 1:
-    //*f = pdflinder(*pphi, *mu, *ke, drv, data);
-    //break;
+  case 1:
+    *f = pdflinder(*pphi, *mu, *ke, drv, data);
+    *dfdP = drv[0];
+    break;
   default:
     fprintf(stderr, "Unsupported interpolation order %d in getdfdE\n", data->iorder);
     *f = *dfdP = 0.0;
