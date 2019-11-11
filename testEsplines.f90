@@ -66,13 +66,12 @@ PROGRAM testEsplines
      DO ipp=1,npts
         IF (der.eq.0) THEN
            CALL getpdf(pmin + ipp*dp, mu, emin + ike*dke, sgnv, val)
+        ELSE IF (der.eq.1) THEN
+           CALL getdfdp(pmin + ipp*dp, mu, emin + ike*dke, sgnv, val, ddp)
+           val = ddp
         ELSE
-           CALL getpdfd(pmin + ipp*dp, mu, emin + ike*dke, sgnv, val, ddp, ddk)
-           IF (der.eq.1) THEN
-              val = ddp
-           ELSE
-              val = ddk
-           END IF
+           CALL getdfde(pmin + ipp*dp, mu, emin + ike*dke, sgnv, val, ddk)
+           val = ddk
         END IF
         WRITE(9,'(E16.8)') val
      END DO !ipp
