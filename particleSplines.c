@@ -172,6 +172,58 @@ int getpdfd_(double *pphi, double *mu, double *ke, int *sgnv, double *f,
   return 0;
 }
 
+/******************************************************************************/
+/* Evaluate f(p_phi, mu, E) and its 1st derivative with respect to E          */
+/*  by 2D cubic B-spline interpolation in P,E */
+int getdfde_(double *pphi, double *mu, double *ke, int *sgnv, double *f,
+	     double *dfdE)
+{
+  spline3d *data;
+
+  data = (*sgnv > 0) ? psplinedata : nsplinedata;
+
+  switch(data->iorder) {
+  case 0:
+    *f = pdfnndE(*pphi, *mu, *ke, dfdE, data);
+    break;
+    //case 1:
+    //*f = pdflinder(*pphi, *mu, *ke, drv, data);
+    //break;
+  default:
+    fprintf(stderr, "Unsupported interpolation order %d in getdfdE\n", data->iorder);
+    *f = *dfdE = 0.0;
+    return 1;
+  }
+
+  return 0;
+}
+
+/******************************************************************************/
+/* Evaluate f(p_phi, mu, E) and its 1st derivative with respect to P_phi      */
+/*  by 2D cubic B-spline interpolation in P,E */
+int getdfdp_(double *pphi, double *mu, double *ke, int *sgnv, double *f,
+	     double *dfdP)
+{
+  spline3d *data;
+
+  data = (*sgnv > 0) ? psplinedata : nsplinedata;
+
+  switch(data->iorder) {
+  case 0:
+    *f = pdfnndP(*pphi, *mu, *ke, dfdP, data);
+    break;
+    //case 1:
+    //*f = pdflinder(*pphi, *mu, *ke, drv, data);
+    //break;
+  default:
+    fprintf(stderr, "Unsupported interpolation order %d in getdfdE\n", data->iorder);
+    *f = *dfdP = 0.0;
+    return 1;
+  }
+
+  return 0;
+}
+
 #ifndef PARTICLE_MPI
 /******************************************************************************/
 /* Particle spline utilities */
@@ -388,7 +440,7 @@ double pdf2d(spline2d *data, const double pphi, const double ke, const int logbi
 }
 
 /******************************************************************************/
-// Evaluate the 2D spline and its first partial derivatives at
+// Evaluate the 2D spline and both its first partial derivatives at
 //  the specified pphi, ke point.
 double pdf2dder(spline2d *data, const double pphi, const double ke,
 		const int logbins, double *fprime)
@@ -412,6 +464,58 @@ double pdf2dder(spline2d *data, const double pphi, const double ke,
   fprime[0] = factor*ys[1]; // df/pphi
   getsplineval(data->ddkspline, pphi, fprime+1);
   fprime[1] *= factor;      // df/dke
+
+  return ys[0];
+}
+
+/******************************************************************************/
+// Evaluate the 2D spline and its first partial derivative with respect to E
+//  at the specified pphi, ke point.
+double pdf2ddfdE(spline2d *data, const double pphi, const double ke,
+		 const int logbins, double *dfdE)
+{
+  double ys[2], factor=1.0;
+  int    pcoef, pstart;
+
+  // Construct the vector of f, df/dk pphi coefficients here
+  pstart = getnzstart(data->pspline, pphi);
+  for (pcoef=pstart; pcoef<pstart+4; pcoef++) {
+    getsplinederiv(data->kspline + pcoef, ke, ys);
+    data->pspline->coefs[pcoef]   = ys[0];
+    data->ddkspline->coefs[pcoef] = ys[1];
+  }
+
+  // Interpolate to get pdf, derivative values
+  //  If logbins then g == ln(f) else g == f
+  getsplineval(data->pspline, pphi, ys); // ys[0] = g
+  if (logbins) factor = (ys[0] = exp(ys[0])); // f
+  else if (ys[0] < 0.0) return *dfdE = 0.0; // Rectify f < 0
+  getsplineval(data->ddkspline, pphi, dfdE);
+  *dfdE *= factor;      // df/dke
+
+  return ys[0];
+}
+
+/******************************************************************************/
+// Evaluate the 2D spline and its first partial derivative with respect to P_phi
+//  at the specified pphi, ke point.
+double pdf2ddfdP(spline2d *data, const double pphi, const double ke,
+		 const int logbins, double *dfdP)
+{
+  double ys[2], factor=1.0;
+  int    pcoef, pstart;
+
+  // Construct the vector of f, df/dk pphi coefficients here
+  pstart = getnzstart(data->pspline, pphi);
+  for (pcoef=pstart; pcoef<pstart+4; pcoef++)
+    getsplineval(data->kspline + pcoef, ke, &(data->pspline->coefs[pcoef]));
+
+  // Interpolate to get pdf, derivative values
+  //  If logbins then g == ln(f) else g == f
+  getsplinederiv(data->pspline, pphi, ys); // ys[0] = g;  ys[1] = dg/dpphi
+  if (logbins) factor = (ys[0] = exp(ys[0])); // f
+  else if (ys[0] < 0.0) return *dfdP = 0.0; // Rectify f < 0
+  *dfdP = factor*ys[1]; // df/pphi
 
   return ys[0];
 }
@@ -446,6 +550,44 @@ double pdfnnder(const double pphi, const double mu, const double ke, double *der
   // Return the normalized spline, derivative values
   fn = pdf2dder(data->pespline + mbin, pphi, ke, data->logbins, derivs);
   derivs[0] *= data->norm;  derivs[1] *= data->norm;
+  return data->norm*fn;
+}
+
+/******************************************************************************/
+// Evaluate f(P,mu,E), df/dE using nearest-neighbor interpolation in mu
+double pdfnndE(const double pphi, const double mu, const double ke, double *dE,
+	       spline3d *data)
+{
+  double fn;
+  int    mbin;
+
+  // Find the mu bin containing this point
+  mbin = mubin(data, mu);
+  if ((mbin < 0) || (mbin >= data->nmubins)) // out of range!
+    return *dE = 0.0;
+
+  // Return the normalized spline, derivative values
+  fn = pdf2ddfdE(data->pespline + mbin, pphi, ke, data->logbins, dE);
+  *dE *= data->norm;
+  return data->norm*fn;
+}
+
+/******************************************************************************/
+// Evaluate f(P,mu,E), df/dPphi using nearest-neighbor interpolation in mu
+double pdfnndP(const double pphi, const double mu, const double ke, double *dP,
+	       spline3d *data)
+{
+  double fn;
+  int    mbin;
+
+  // Find the mu bin containing this point
+  mbin = mubin(data, mu);
+  if ((mbin < 0) || (mbin >= data->nmubins)) // out of range!
+    return *dP = 0.0;
+
+  // Return the normalized spline, derivative values
+  fn = pdf2ddfdP(data->pespline + mbin, pphi, ke, data->logbins, dP);
+  *dP *= data->norm;
   return data->norm*fn;
 }
 
