@@ -183,18 +183,29 @@ SUBROUTINE writejac_omp(froot, nparts, nthreads, &
      STOP "Stopped"
   ENDIF
   ierr = nf90_def_dim(ncid, 'nptcl', NF90_UNLIMITED, ptcdim)
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_def_dim(ncid, 'nspec', 1, specdim)
-  dimids(1) = specdim;  dimids(2) = ptcdim
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
+  dimids = (/ specdim, ptcdim /)
+  strt = (/ 1, 1 /);  cnt = (/ 1, nfbufsize /)
   ierr = nf90_def_var(ncid, 'pphi', NF90_DOUBLE, dimids, ppid)
   IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_put_att(ncid, ppid, 'units', 'kg m^2/s')
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_def_var(ncid, 'mu', NF90_DOUBLE, dimids, muid)
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_put_att(ncid, muid, 'units', 'A m^2')
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_def_var(ncid, 'E', NF90_DOUBLE, dimids, Eid)
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_put_att(ncid, Eid, 'units', 'J')
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_def_var(ncid, 'weight', NF90_DOUBLE, dimids, wtid)
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_def_var(ncid, 'sgn_v', NF90_BYTE, dimids, lid)
-  ierr = nf90_enddef(ncid)
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
+  ierr = nf90_enddef(ncid) !Leave define mode, enter data mode
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
 
   ALLOCATE(pphi(nfbufsize), mu(nfbufsize), Etot(nfbufsize), isv(nfbufsize), wts(nfbufsize))
   wts = 1.0
@@ -205,7 +216,6 @@ SUBROUTINE writejac_omp(froot, nparts, nthreads, &
   seed = 1
   CALL RANDOM_SEED(PUT=seed)
   ipart = 0
-  strt = (/ 1, 1 /);  cnt = (/ 1, nfbufsize /)
   WRITE(*,'(A,I7)')' I/O buffer size =',nfbufsize
 
   ! Main loop
@@ -259,9 +269,13 @@ SUBROUTINE writejac_omp(froot, nparts, nthreads, &
 
      ! Flush buffers to NetCDF file
      ierr = nf90_put_var(ncid, ppid, pphi, start=strt, count=cnt)
+     IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
      ierr = nf90_put_var(ncid, muid, mu,   start=strt, count=cnt)
+     IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
      ierr = nf90_put_var(ncid, Eid,  Etot, start=strt, count=cnt)
+     IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
      ierr = nf90_put_var(ncid, lid,  isv,  start=strt, count=cnt)
+     IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
      ierr = nf90_put_var(ncid, wtid, wts, start=strt, count=cnt)
      IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
      strt(2) = strt(2) + cnt(2)
@@ -279,6 +293,7 @@ SUBROUTINE writejac_omp(froot, nparts, nthreads, &
 
   DEALLOCATE(pphi, mu, Etot, isv, wts, seed)
   ierr = nf90_close(ncid)
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
 END SUBROUTINE writejac_omp
 
 !--------------------------------------------------------------------
