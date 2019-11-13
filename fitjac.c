@@ -120,18 +120,18 @@ int main(int argc, char *argv[])
   /* Read all particle data from file */
   sprintf(inname, "%s_condensed.cdf", argv[1]);
   readParticleData(inname, &particle, &nparts, &csorted, 0);
-  printf("%d %ssorted particles read; last = %le\t%le\t%le\t%d\n", nparts,
+  printf("%d %ssorted particles read; last = %le  %le  %le  %d  %.3le\n", nparts,
 	 (csorted) ? "" : "un",
 	 particle[nparts-1].pphi, particle[nparts-1].mu, particle[nparts-1].ke,
-	 particle[nparts-1].sig);
+	 particle[nparts-1].sig, particle[nparts-1].wt);
 
   /* Read all jacobian data from file */
   sprintf(inname, "%s_jacobian.cdf", argv[1]);
   readParticleData(inname, &jacobian, &njac, &jsorted, 0);
-  printf("%d %ssorted particles read; last = %le\t%le\t%le\t%d\n", njac,
+  printf("%d %ssorted particles read; last = %le  %le  %le  %d  %.3le\n", njac,
 	 (jsorted) ? "" : "un",
 	 jacobian[njac-1].pphi, jacobian[njac-1].mu, jacobian[njac-1].ke,
-	 jacobian[njac-1].sig);
+	 jacobian[njac-1].sig, jacobian[njac-1].wt);
 
   /* Calculate cmin (minimum ratio of ke to mu), emax */
   cmin = particle[0].ke / particle[0].mu;  emax = particle[0].ke;

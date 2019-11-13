@@ -45,17 +45,11 @@ PROGRAM mcgen
   CALL sanity(froot, e_C, m_kg)
 
   !Generate Jacobian
-  IF (nthreads.LT.2) THEN
-     CALL writejac(froot, nparts, &
-          ps%R_min_lcfs,ps%R_max_lcfs,ps%Z_min_lcfs,ps%Z_max_lcfs,&
-          vlel_min,vlel_max,vps_max,&
-          e_C,m_kg)
-  ELSE
-     CALL writejac_omp(froot, nparts, nthreads, &
-          ps%R_min_lcfs,ps%R_max_lcfs,ps%Z_min_lcfs,ps%Z_max_lcfs,&
-          vlel_min,vlel_max,vps_max,&
-          e_C,m_kg)
-  ENDIF
+  CALL writejac_omp(froot, nparts, nthreads, &
+       ps%R_min_lcfs,ps%R_max_lcfs,ps%Z_min_lcfs,ps%Z_max_lcfs,&
+       vlel_min,vlel_max,vps_max,&
+       e_C,m_kg)
+
 END PROGRAM mcgen
 
 !--------------------------------------------------------------------
@@ -123,160 +117,6 @@ END SUBROUTINE ckerr
 !--------------------------------------------------------------------
 !Compute a particle distribution that is uniform in x,v to get
 ! numerical Jacobian.
-SUBROUTINE writejac(froot, nparts, Rmin, Rmax, zmin, zmax, &
-     vlmin, vlmax, vpsmax, ioncharge, ionmass)
-  USE plasma_state_mod
-  USE netcdf
-  IMPLICIT NONE
-  INTRINSIC SQRT, TRIM
-
-  CHARACTER*96, INTENT(IN)     :: froot
-  INTEGER, INTENT(IN)          :: nparts
-  REAL(KIND=rspec), INTENT(IN) :: Rmin, Rmax, zmin, zmax
-  REAL(KIND=rspec), INTENT(IN) :: vlmin, vlmax, vpsmax
-  REAL(KIND=rspec), INTENT(IN) :: ioncharge, ionmass
-
-  INTEGER, PARAMETER :: nfbufsize = 16384, interval = 250000
-
-  REAL(KIND=rspec), ALLOCATABLE, DIMENSION(:) :: pphi, mu, Etot
-  REAL(KIND=rspec) buffer(3)
-  REAL(KIND=rspec) zh, dz, rh, modB, vlh, dvl, bphi
-  REAL(KIND=rspec) mot, pmag, tmp
-  REAL(KIND=rspec) rhs, drs, vphs, psi_lcfs, psiw
-  REAL x
-  INTEGER ids(3), dimids(2), strt(2), cnt(2)
-  INTEGER ierr, ipart, jbuf, minseed, iplast
-  INTEGER ncid, ptcdim, specdim, ppid, muid, Eid, wtid, lid
-  INTEGER, DIMENSION(:), ALLOCATABLE :: isv, seed
-
-  PRINT *,'STARTING JAC'
-
-  ids(1) = ps%id_BRRZ
-  ids(2) = ps%id_BZRZ
-  ids(3) = ps%id_BphiRZ
-
-  dz = zmax - zmin
-  drs = Rmax**2 - Rmin**2
-  dvl = vlmax - vlmin
-  mot = 0.5*ionmass
-
-  ! Get max flux (at lcfs)
-  CALL ps_intrp_2d(ps%R_min_lcfs, ps%z_axis, ps%id_PsiRZ, tmp, ierr)
-  CALL ckerr(ierr,'ps_intrp_2d')
-  CALL ps_intrp_2d(ps%R_max_lcfs, ps%z_axis, ps%id_PsiRZ, psi_lcfs, ierr)
-  CALL ckerr(ierr,'ps_intrp_2d')
-  IF (tmp.GT.psi_lcfs) psi_lcfs = tmp
-  PRINT *,'psi_lcfs = ',psi_lcfs
-  CALL ps_intrp_2d(ps%R_axis, ps%z_axis, ps%id_PsiRZ, tmp, ierr)
-  CALL ckerr(ierr,'ps_intrp_2d')
-  PRINT *,'psi_axis = ',tmp
-  CALL ps_intrp_2d(ps%R_axis, ps%z_axis, ps%id_BphiRZ, tmp, ierr)
-  CALL ckerr(ierr,'ps_intrp_2d')
-  PRINT *,'B_phi_axis = ',tmp
-  psiw = ioncharge*psi_lcfs
-
-  ! NetCDF
-  ierr = nf90_create(TRIM(froot)//'_jacobian.cdf', NF90_CLOBBER, ncid)
-  IF (ierr.NE.NF90_NOERR) THEN
-     PRINT *,TRIM(nf90_strerror(ierr))
-     STOP "Stopped"
-  ENDIF
-  ierr = nf90_def_dim(ncid, 'nptcl', NF90_UNLIMITED, ptcdim)
-  ierr = nf90_def_dim(ncid, 'nspec', 1, specdim)
-  dimids(1) = specdim;  dimids(2) = ptcdim
-  ierr = nf90_def_var(ncid, 'pphi', NF90_DOUBLE, dimids, ppid)
-  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
-  ierr = nf90_put_att(ncid, ppid, 'units', 'kg m^2/s')
-  ierr = nf90_def_var(ncid, 'mu', NF90_DOUBLE, dimids, muid)
-  ierr = nf90_put_att(ncid, muid, 'units', 'A m^2')
-  ierr = nf90_def_var(ncid, 'E', NF90_DOUBLE, dimids, Eid)
-  ierr = nf90_put_att(ncid, Eid, 'units', 'J')
-  ierr = nf90_def_var(ncid, 'weight', NF90_DOUBLE, dimids, wtid)
-  ierr = nf90_def_var(ncid, 'sgn_v', NF90_BYTE, dimids, lid)
-  ierr = nf90_enddef(ncid)
-
-  ALLOCATE(pphi(nfbufsize), mu(nfbufsize), Etot(nfbufsize), isv(nfbufsize))
-
-  ! Initialize counters
-  CALL RANDOM_SEED(SIZE=minseed) !Returns minimum array length for random seed
-  ALLOCATE(seed(minseed))
-  seed = 1
-  CALL RANDOM_SEED(PUT=seed)
-  ipart = 0; jbuf = 1; iplast = 0
-  strt = (/ 1, 1 /);  cnt = (/ 1, nfbufsize /)
-  WRITE(*,'(A,I7)')' I/O buffer size =',nfbufsize
-
-  ! Main loop
-  PRINT *,'Generating',nparts,'random particles within LCFS...'
-  DO
-     !Choose random real space coordinates
-     CALL RANDOM_NUMBER(x)
-     zh = zmin + x*dz
-     CALL RANDOM_NUMBER(x)
-     rhs = Rmin**2 + x*drs
-     rh = SQRT(rhs)
-
-     !Determine if it falls within the lcfs
-     CALL ps_intrp_2d(rh, zh, ps%id_PsiRZ, pmag, ierr)
-     CALL ckerr(ierr,'ps_intrp_2d')
-     IF (pmag.LE.psi_lcfs) ipart = ipart + 1
-
-     !Choose random velocity space coordinates
-     CALL RANDOM_NUMBER(x)
-     vphs = x*vpsmax
-     CALL RANDOM_NUMBER(x)
-     vlh = vlmin + x*dvl
-
-     !Convert to constants of motion
-     CALL ps_intrp_2d(rh, zh, ids, buffer, ierr) !Retrieve magnetic field
-     CALL ckerr(ierr,'ps_intrp_2d')
-     modB = SQRT(buffer(1)**2 + buffer(2)**2 + buffer(3)**2)
-     bphi = buffer(3)/modB
-
-     Etot(jbuf) = mot*(vphs + vlh**2)
-     mu(jbuf) = mot*vphs/modB
-     pphi(jbuf) = ioncharge*pmag - ionmass*rh*vlh*bphi  !J.B. sign of vlh term
-     !pphi(jbuf) = ioncharge*pmag + ionmass*rh*vlh*bphi  !D.L. sign of vlh term
-
-     !Classify orbit
-     if (vlh.GT.0.0) THEN
-        isv(jbuf) = 1
-     ELSE
-        isv(jbuf) = -1
-     ENDIF
-
-     IF ((jbuf.EQ.nfbufsize).OR.(ipart.GE.nparts)) THEN
-        cnt(2) = jbuf
-        IF (cnt(2).GT.0) THEN !Flush buffer to NetCDF file
-           ierr = nf90_put_var(ncid, ppid, pphi, start=strt, count=cnt)
-           ierr = nf90_put_var(ncid, muid, mu,   start=strt, count=cnt)
-           ierr = nf90_put_var(ncid, Eid,  Etot, start=strt, count=cnt)
-           ierr = nf90_put_var(ncid, lid,  isv,  start=strt, count=cnt)
-           Etot(1:cnt(2)) = 1.0
-           ierr = nf90_put_var(ncid, wtid, Etot, start=strt, count=cnt)
-           IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
-           strt(2) = strt(2) + cnt(2)
-           jbuf = 0
-        ENDIF
-     ENDIF
-     jbuf = jbuf + 1
-
-     IF (ipart.GE.nparts) EXIT
-
-     IF (MOD(ipart,interval).EQ.0) THEN
-        IF (ipart.NE.iplast) PRINT *,ipart
-        iplast = ipart
-     ENDIF
-  END DO
-  PRINT *,strt(2)-1,' total particles written.'
-
-  DEALLOCATE(pphi, mu, Etot, isv, seed)
-  ierr = nf90_close(ncid)
-END SUBROUTINE writejac
-
-!--------------------------------------------------------------------
-!Compute a particle distribution that is uniform in x,v to get
-! numerical Jacobian.
 SUBROUTINE writejac_omp(froot, nparts, nthreads, &
                         Rmin, Rmax, zmin, zmax, &
                         vlmin, vlmax, vpsmax, ioncharge, ionmass)
@@ -294,7 +134,7 @@ SUBROUTINE writejac_omp(froot, nparts, nthreads, &
   REAL, PARAMETER    :: interval = 5.0 ! seconds
   INTEGER, PARAMETER :: nfbufsize = 10080
 
-  REAL(KIND=rspec), ALLOCATABLE, DIMENSION(:) :: pphi, mu, Etot
+  REAL(KIND=rspec), ALLOCATABLE, DIMENSION(:) :: pphi, mu, Etot, wts
   REAL(KIND=rspec) buffer(3)
   REAL(KIND=rspec) zh, dz, rh, modB, vlh, dvl, bphi
   REAL(KIND=rspec) mot, pmag, tmp
@@ -305,7 +145,12 @@ SUBROUTINE writejac_omp(froot, nparts, nthreads, &
   INTEGER ncid, ptcdim, specdim, ppid, muid, Eid, wtid, lid
   INTEGER, DIMENSION(:), ALLOCATABLE :: isv, seed
 
-  WRITE(*,'(A,I4,A)')'STARTING JAC_OMP WITH',nthreads,' THREADS'
+  WRITE(*,*)
+  IF (nthreads.EQ.1) THEN
+     WRITE(*,'(A)')'STARTING JAC_OMP WITH ONE THREAD'
+  ELSE
+     WRITE(*,'(A,I4,A)')'STARTING JAC_OMP WITH',nthreads,' THREADS'
+  ENDIF
 
   ids(1) = ps%id_BRRZ
   ids(2) = ps%id_BZRZ
@@ -331,35 +176,46 @@ SUBROUTINE writejac_omp(froot, nparts, nthreads, &
   PRINT *,'B_phi_axis = ',tmp
   psiw = ioncharge*psi_lcfs
 
-  ! NetCDF
+  ! Create NetCDF output file, define variables
   ierr = nf90_create(TRIM(froot)//'_jacobian.cdf', NF90_CLOBBER, ncid)
   IF (ierr.NE.NF90_NOERR) THEN
      PRINT *,TRIM(nf90_strerror(ierr))
      STOP "Stopped"
   ENDIF
   ierr = nf90_def_dim(ncid, 'nptcl', NF90_UNLIMITED, ptcdim)
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_def_dim(ncid, 'nspec', 1, specdim)
-  dimids(1) = specdim;  dimids(2) = ptcdim
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
+  dimids = (/ specdim, ptcdim /)
+  strt = (/ 1, 1 /);  cnt = (/ 1, nfbufsize /)
   ierr = nf90_def_var(ncid, 'pphi', NF90_DOUBLE, dimids, ppid)
   IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_put_att(ncid, ppid, 'units', 'kg m^2/s')
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_def_var(ncid, 'mu', NF90_DOUBLE, dimids, muid)
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_put_att(ncid, muid, 'units', 'A m^2')
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_def_var(ncid, 'E', NF90_DOUBLE, dimids, Eid)
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_put_att(ncid, Eid, 'units', 'J')
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_def_var(ncid, 'weight', NF90_DOUBLE, dimids, wtid)
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_def_var(ncid, 'sgn_v', NF90_BYTE, dimids, lid)
-  ierr = nf90_enddef(ncid)
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
+  ierr = nf90_enddef(ncid) !Leave define mode, enter data mode
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
 
-  ALLOCATE(pphi(nfbufsize), mu(nfbufsize), Etot(nfbufsize), isv(nfbufsize))
+  ALLOCATE(pphi(nfbufsize), mu(nfbufsize), Etot(nfbufsize), isv(nfbufsize), wts(nfbufsize))
+  wts = 1.0
 
   ! Initialize counters
-  CALL RANDOM_SEED(SIZE=minseed)
+  CALL RANDOM_SEED(SIZE=minseed) !Returns minimum array length for random seed
   ALLOCATE(seed(minseed))
   seed = 1
   CALL RANDOM_SEED(PUT=seed)
   ipart = 0
-  strt = (/ 1, 1 /);  cnt = (/ 1, nfbufsize /)
   WRITE(*,'(A,I7)')' I/O buffer size =',nfbufsize
 
   ! Main loop
@@ -399,7 +255,8 @@ SUBROUTINE writejac_omp(froot, nparts, nthreads, &
 
         Etot(jbuf) = mot*(vphs + vlh**2)
         mu(jbuf) = mot*vphs/modB
-        pphi(jbuf) = ioncharge*pmag - ionmass*rh*vlh*bphi
+        pphi(jbuf) = ioncharge*pmag - ionmass*rh*vlh*bphi  !J.Breslau sign of vlh term
+        !pphi(jbuf) = ioncharge*pmag + ionmass*rh*vlh*bphi  !D.Liu sign of vlh term
 
         !Classify orbit
         if (vlh.GT.0.0) THEN
@@ -412,11 +269,14 @@ SUBROUTINE writejac_omp(froot, nparts, nthreads, &
 
      ! Flush buffers to NetCDF file
      ierr = nf90_put_var(ncid, ppid, pphi, start=strt, count=cnt)
+     IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
      ierr = nf90_put_var(ncid, muid, mu,   start=strt, count=cnt)
+     IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
      ierr = nf90_put_var(ncid, Eid,  Etot, start=strt, count=cnt)
+     IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
      ierr = nf90_put_var(ncid, lid,  isv,  start=strt, count=cnt)
-     Etot(1:cnt(2)) = 1.0
-     ierr = nf90_put_var(ncid, wtid, Etot, start=strt, count=cnt)
+     IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
+     ierr = nf90_put_var(ncid, wtid, wts, start=strt, count=cnt)
      IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
      strt(2) = strt(2) + cnt(2)
 
@@ -431,8 +291,9 @@ SUBROUTINE writejac_omp(froot, nparts, nthreads, &
   END DO
   PRINT *,strt(2)-1,' total particles written.'
 
-  DEALLOCATE(pphi, mu, Etot, isv, seed)
+  DEALLOCATE(pphi, mu, Etot, isv, wts, seed)
   ierr = nf90_close(ncid)
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
 END SUBROUTINE writejac_omp
 
 !--------------------------------------------------------------------
