@@ -33,6 +33,7 @@ int main(int argc, char *argv[])
   char            path[256];
   struct dirent **namelist;
   double         *lambda, *Rcoord, *zcoord, *muval, *pphi, *modv, *wt;
+  signed char    *cp;
   double          Rmin=1e+30, Rmax=-1e+30, zmin=1e+30, zmax=-1e+30, vmax=-1e+30;
   double          minwt=1.0e+80, maxwt=0.0, vl, vr;
   nc_type         xtype;
@@ -48,7 +49,6 @@ int main(int argc, char *argv[])
   const char      vname[]="vay", Rname[]="rmjionay", zname[]="xzionay";
   const char      wname[] = "wghtay";
   const char      punits[]="kg m^2/s", munits[]="A m^2";
-  signed char     cp;
 
   if (argc == 1) usage(*argv);
 
@@ -77,7 +77,7 @@ int main(int argc, char *argv[])
     sprintf(path, "%s/%s_condensed.cdf", argv[2], argv[1]);
   else
     sprintf(path, "%s_condensed.cdf", argv[1]);
-  ierr = nc_create(path, NC_CLOBBER, &ncido);
+  ierr = nc_create(path, NC_NETCDF4, &ncido);
   if (ierr != NC_NOERR) {
     fprintf(stderr, "Error creating condensed file: %s.\n", nc_strerror(ierr));
     return 1;
@@ -85,18 +85,24 @@ int main(int argc, char *argv[])
   ierr = nc_def_dim(ncido, "nptcl", NC_UNLIMITED, &ptcdim);
   ierr = nc_def_dim(ncido, "nspec", (size_t)specinf.nnbi, &specdim);
   dimids[0] = ptcdim;  dimids[1] = specdim;
+  count[0] = 2048;  count[1] = 1;
   ierr = nc_def_var(ncido, "mass", NC_DOUBLE, 1, dimids+1, &mido);
   ierr = nc_put_att_text(ncido, mido, "units", 2, "kg");
   ierr = nc_def_var(ncido, "charge", NC_DOUBLE, 1, dimids+1, &cido);
   ierr = nc_put_att_text(ncido, cido, "units", 1, "C");
   ierr = nc_def_var(ncido, "pphi", NC_DOUBLE, 2, dimids, &ppido);
+  ierr = nc_def_var_chunking(ncido, ppido, NC_CHUNKED, count);
   ierr = nc_put_att_text(ncido, ppido, "units", strlen(punits), punits);
   ierr = nc_def_var(ncido, "mu", NC_DOUBLE, 2, dimids, &muido);
+  ierr = nc_def_var_chunking(ncido, muido, NC_CHUNKED, count);
   ierr = nc_put_att_text(ncido, muido, "units", strlen(munits), munits);
   ierr = nc_def_var(ncido, "E", NC_DOUBLE, 2, dimids, &Eido);
+  ierr = nc_def_var_chunking(ncido, Eido, NC_CHUNKED, count);
   ierr = nc_put_att_text(ncido, Eido, "units", 1, "J");
   ierr = nc_def_var(ncido, "weight", NC_DOUBLE, 2, dimids, &wtido);
+  ierr = nc_def_var_chunking(ncido, wtido, NC_CHUNKED, count);
   ierr = nc_def_var(ncido, "sgn_v", NC_BYTE, 2, dimids, &lido);
+  ierr = nc_def_var_chunking(ncido, lido, NC_CHUNKED, count);
   ierr = nc_enddef(ncido); /* leave define mode */
 
   /* Write species data */
@@ -201,11 +207,12 @@ int main(int argc, char *argv[])
     pphi   = (double *)malloc(nptcls * sizeof(double));
     modv   = (double *)malloc(nptcls * sizeof(double));
     wt     = (double *)malloc(nptcls * sizeof(double));
+    cp     = (signed char *)malloc(nptcls * sizeof(signed char));
 
     /* Read particle data */
-    count[specid] = 1;  count[ptcid] = nptcls;
     for (ispec=nnzf=0; ispec<specinf.nnbi; ispec++) {
       start[specid] = ispec;  start[ptcid] = 0;
+      count[specid] = 1;  count[ptcid] = nptcls;
       ierr = nc_get_vara_double(ncid, lmbid, start, count, lambda);
       if (ierr != NC_NOERR) {
 	fprintf(stderr, "Error: %s.\n", nc_strerror(ierr)); break;
@@ -247,7 +254,6 @@ int main(int argc, char *argv[])
 	      wt[0], wt[1], wt[2]);
 
       /* Convert nonzero particle data to required coordinates */
-      start[1] = ispec;
       for (ipart=nnzs=0; ipart<nptcls; ipart++) {
 	if (wt[ipart] > 0.0) {
 
@@ -278,31 +284,43 @@ int main(int argc, char *argv[])
 	  if (zcoord[ipart] < zmin) zmin = zcoord[ipart];
 	  if (modv[ipart] > vmax) vmax = modv[ipart];
 
-	  /* Output */
-	  start[0] = last[ispec] + nnzs;
-	  pphi[ipart] *= -1.0e-7;
-	  ierr = nc_put_var1_double(ncido, ppido, start, pphi+ipart);
-	  muval[ipart] *= 1.0e-3;
-	  ierr = nc_put_var1_double(ncido, muido, start, muval+ipart);
-	  modv[ipart] *= 5.0e-5*specinf.mass[ispec]*modv[ipart];
-	  ierr = nc_put_var1_double(ncido, Eido, start, modv+ipart);
-	  ierr = nc_put_var1_double(ncido, wtido, start, wt+ipart);
-	  cp = (lambda[ipart] > 0.0) ? (char)1 : (char)(-1);
-	  ierr = nc_put_var1_schar(ncido, lido, start, &cp);
+	  /* Convert units */
+	  pphi[nnzs] = -1.0e-7*pphi[ipart];
+	  muval[nnzs] = 1.0e-3*muval[ipart];
+	  modv[nnzs] = 5.0e-5*specinf.mass[ispec]*modv[ipart]*modv[ipart];
+	  wt[nnzs] = wt[ipart];
+	  cp[nnzs] = (lambda[ipart] > 0.0) ? (char)1 : (char)(-1);
 	  nnzs++;
 	}
       } /* end loop ipart */
       fprintf(stderr, "%d valid particles of this species.\n", nnzs);
-      last[ispec] += nnzs;
 
-      nnzf += nnzs;
+      if (nnzs) {
+	/* Write output to condensed file */
+	start[0] = last[ispec];  start[1] = ispec;
+	count[0] = nnzs;  count[1] = 1;
+	ierr = nc_put_vara_double(ncido, ppido, start, count, pphi);
+	if (ierr != NC_NOERR) fprintf(stderr, "Error: %s.\n", nc_strerror(ierr));
+	ierr = nc_put_vara_double(ncido, muido, start, count, muval);
+	if (ierr != NC_NOERR) fprintf(stderr, "Error: %s.\n", nc_strerror(ierr));
+	ierr = nc_put_vara_double(ncido, Eido, start, count, modv);
+	if (ierr != NC_NOERR) fprintf(stderr, "Error: %s.\n", nc_strerror(ierr));
+	ierr = nc_put_vara_double(ncido, wtido, start, count, wt);
+	if (ierr != NC_NOERR) fprintf(stderr, "Error: %s.\n", nc_strerror(ierr));
+	ierr = nc_put_vara_schar(ncido, lido, start, count, cp);
+	if (ierr != NC_NOERR) fprintf(stderr, "Error: %s.\n", nc_strerror(ierr));
+
+	/* Update counters */
+	last[ispec] += nnzs;
+	nnzf += nnzs;
+      }
     } /* end loop ispec */
     fprintf(stderr, "%d valid particles in this file.\n", nnzf);
     nnzt += nnzf;
 
     /* Free particle data storage */
     free(lambda);  free(Rcoord);  free(zcoord);  free(muval);
-    free(pphi);  free(modv);  free(wt);
+    free(pphi);  free(modv);  free(wt);  free(cp);
 
   l10:   /* Close the file */
     ierr = nc_close(ncid);
