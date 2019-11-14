@@ -131,10 +131,11 @@ SUBROUTINE writejac_omp(froot, nparts, nthreads, &
   REAL(KIND=rspec), INTENT(IN) :: vlmin, vlmax, vpsmax
   REAL(KIND=rspec), INTENT(IN) :: ioncharge, ionmass
 
-  REAL, PARAMETER    :: interval = 5.0 ! seconds
+  REAL(KIND=rspec), PARAMETER  :: one=1.0
+  REAL, PARAMETER    :: interval = 5.0 ! wallclock seconds
   INTEGER, PARAMETER :: nfbufsize = 10080
 
-  REAL(KIND=rspec), ALLOCATABLE, DIMENSION(:) :: pphi, mu, Etot, wts
+  REAL(KIND=rspec), ALLOCATABLE, DIMENSION(:) :: pphi, mu, Etot
   REAL(KIND=rspec) buffer(3)
   REAL(KIND=rspec) zh, dz, rh, modB, vlh, dvl, bphi
   REAL(KIND=rspec) mot, pmag, tmp
@@ -177,7 +178,7 @@ SUBROUTINE writejac_omp(froot, nparts, nthreads, &
   psiw = ioncharge*psi_lcfs
 
   ! Create NetCDF output file, define variables
-  ierr = nf90_create(TRIM(froot)//'_jacobian.cdf', NF90_CLOBBER, ncid)
+  ierr = nf90_create(TRIM(froot)//'_jacobian.cdf', NF90_NETCDF4, ncid)
   IF (ierr.NE.NF90_NOERR) THEN
      PRINT *,TRIM(nf90_strerror(ierr))
      STOP "Stopped"
@@ -188,40 +189,41 @@ SUBROUTINE writejac_omp(froot, nparts, nthreads, &
   IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   dimids = (/ specdim, ptcdim /)
   strt = (/ 1, 1 /);  cnt = (/ 1, nfbufsize /)
-  ierr = nf90_def_var(ncid, 'pphi', NF90_DOUBLE, dimids, ppid)
+  ierr = nf90_def_var(ncid, 'pphi', NF90_DOUBLE, dimids, ppid, CHUNKSIZES=cnt)
   IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_put_att(ncid, ppid, 'units', 'kg m^2/s')
   IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
-  ierr = nf90_def_var(ncid, 'mu', NF90_DOUBLE, dimids, muid)
+  ierr = nf90_def_var(ncid, 'mu', NF90_DOUBLE, dimids, muid, CHUNKSIZES=cnt)
   IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_put_att(ncid, muid, 'units', 'A m^2')
   IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
-  ierr = nf90_def_var(ncid, 'E', NF90_DOUBLE, dimids, Eid)
+  ierr = nf90_def_var(ncid, 'E', NF90_DOUBLE, dimids, Eid, CHUNKSIZES=cnt)
   IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_put_att(ncid, Eid, 'units', 'J')
   IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
-  ierr = nf90_def_var(ncid, 'weight', NF90_DOUBLE, dimids, wtid)
+  ierr = nf90_def_var(ncid, 'weight', NF90_DOUBLE, dimids, wtid, CHUNKSIZES=cnt)
   IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
-  ierr = nf90_def_var(ncid, 'sgn_v', NF90_BYTE, dimids, lid)
+  ierr = nf90_def_var_fill(ncid, wtid, 0, one)
+  IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
+  ierr = nf90_def_var(ncid, 'sgn_v', NF90_BYTE, dimids, lid, CHUNKSIZES=cnt)
   IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
   ierr = nf90_enddef(ncid) !Leave define mode, enter data mode
   IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
 
-  ALLOCATE(pphi(nfbufsize), mu(nfbufsize), Etot(nfbufsize), isv(nfbufsize), wts(nfbufsize))
-  wts = 1.0
+  ALLOCATE(pphi(nfbufsize), mu(nfbufsize), Etot(nfbufsize), isv(nfbufsize))
+  WRITE(*,'(A,I7)')' I/O buffer size =',nfbufsize
 
-  ! Initialize counters
+  ! Initialize seed for random number generator
   CALL RANDOM_SEED(SIZE=minseed) !Returns minimum array length for random seed
   ALLOCATE(seed(minseed))
   seed = 1
   CALL RANDOM_SEED(PUT=seed)
-  ipart = 0
-  WRITE(*,'(A,I7)')' I/O buffer size =',nfbufsize
 
   ! Main loop
   PRINT *,'Generating',nparts,'random particles within LCFS...'
   PRINT *,' Inside     /     Total'
   CALL cpu_time(lasttime)
+  ipart = 0
   DO
      lparts =0
 !$OMP PARALLEL DO DEFAULT(SHARED) &
@@ -276,22 +278,20 @@ SUBROUTINE writejac_omp(froot, nparts, nthreads, &
      IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
      ierr = nf90_put_var(ncid, lid,  isv,  start=strt, count=cnt)
      IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
-     ierr = nf90_put_var(ncid, wtid, wts, start=strt, count=cnt)
-     IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
      strt(2) = strt(2) + cnt(2)
 
      ipart = ipart + lparts
      IF (ipart.GE.nparts) EXIT
 
      CALL cpu_time(thistime)
-     IF (thistime - lasttime .GE. interval) THEN
+     IF (thistime - lasttime .GE. interval*nthreads) THEN
         PRINT *,ipart,'/',strt(2)-1
         lasttime = thistime
      ENDIF
   END DO
   PRINT *,strt(2)-1,' total particles written.'
 
-  DEALLOCATE(pphi, mu, Etot, isv, wts, seed)
+  DEALLOCATE(pphi, mu, Etot, isv, seed)
   ierr = nf90_close(ncid)
   IF (ierr.NE.NF90_NOERR) PRINT *,TRIM(nf90_strerror(ierr))
 END SUBROUTINE writejac_omp
