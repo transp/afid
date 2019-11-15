@@ -228,7 +228,6 @@ int getdfdp_(double *pphi, double *mu, double *ke, int *sgnv, double *f,
   return 0;
 }
 
-#ifndef PARTICLE_MPI
 /******************************************************************************/
 /* Particle spline utilities */
 /* Serial version of spline coefficient reader */
@@ -239,11 +238,19 @@ spline3d *readspline(const char *fname)
   char     buf[64];
   double   emin;
   int      mbin, pcoef, kcoef, npcoefs, nkcoefs;
+#ifdef PARTICLE_MPI
+  int      myrank;
+#endif
 
   /* Allocate storage */
   data = (spline3d *)malloc(sizeof(spline3d));
   data->norm = data->pmin = 1.0;  data->pmax = data->emax = -1.0;  data->cmin=1.0e+9;
   data->logbins = 0;  data->iorder = 0;
+
+#ifdef PARTICLE_MPI
+  MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
+  if (!myrank) { // Only root process reads file
+#endif
 
   /* Open input file */
   if ((fp = fopen(fname, "r")) == NULL) {
@@ -300,75 +307,13 @@ spline3d *readspline(const char *fname)
   /* Close input file */
   fclose(fp);
 
-  return data;
-}
-#else
-/******************************************************************************/
-/* MPI version of spline coefficient reader: root reads, bcasts. */
-spline3d *readspline(const char *fname)
-{
-  FILE     *fp;
-  spline3d *data;
-  double   emin;
-  int      myrank, mbin, pcoef, kcoef, npcoefs, nkcoefs;
+#ifdef PARTICLE_MPI
+  } // end if !myrank
+
+  /* Broadcast number of mu bins */
+  MPI_Bcast(&data->nmubins, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
   /* Allocate storage */
-  data = (spline3d *)malloc(sizeof(spline3d));
-  data->norm = data->pmin = 1.0;  data->pmax = data->emax = -1.0;  data->cmin=1.0e+9;
-
-  MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
-  if (!myrank) { /* Only root process reads file */
-
-    /* Open input file */
-    if ((fp = fopen(fname, "r")) == NULL) {
-      fprintf(stderr, "Error: could not open file %s for reading.\n", fname);
-      exit(1);
-    }
-
-    /* Read data */
-    fscanf(fp, "%d", &data->nmubins);
-    if (data->nmubins < 1) exit(1);
-    if ((data->mubounds = (double *)malloc((data->nmubins+1) * sizeof(double))) == NULL) {
-      fputs("Out of memory in readspline.\n", stderr);
-      exit(2);
-    }
-    data->mubounds[0] = 0.0;
-    if ((data->pespline = (spline2d *)malloc(data->nmubins * sizeof(spline2d))) == NULL) {
-      fputs("Out of memory in readspline.\n", stderr);
-      exit(2);
-    }
-    for (mbin=0; mbin<data->nmubins; mbin++) {
-      fscanf(fp, "%le", &data->mubounds[mbin+1]);
-      if (data->mubounds[mbin] >= data->mubounds[mbin+1]) exit(1);
-      fscanf(fp, "%le\t%le\t%le\t%le",
-	     &data->pespline[mbin].cmin, &data->pespline[mbin].emax,
-	     &data->pespline[mbin].pmin, &data->pespline[mbin].pmax);
-      if (data->pespline[mbin].pmin < data->pmin) data->pmin = data->pespline[mbin].pmin;
-      if (data->pespline[mbin].pmax > data->pmax) data->pmax = data->pespline[mbin].pmax;
-      if (data->pespline[mbin].cmin < data->cmin) data->cmin = data->pespline[mbin].cmin;
-      if (data->pespline[mbin].emax > data->emax) data->emax = data->pespline[mbin].emax;
-      if (data->pespline[mbin].pmin >= data->pespline[mbin].pmax) exit(1);
-      emin = data->pespline[mbin].cmin * data->mubounds[mbin];
-      fscanf(fp, "%d\t%d", &npcoefs, &nkcoefs);
-      if ((npcoefs < 4) || (nkcoefs < 4)) exit(1);
-      data->pespline[mbin].npcoefs = npcoefs;
-      data->pespline[mbin].nkcoefs = nkcoefs;
-      splinealloc(&data->pespline[mbin].kspline, npcoefs, nkcoefs, 4,
-		  emin, data->pespline[mbin].emax);
-      for (pcoef=0; pcoef<npcoefs; pcoef++)
-	for (kcoef=0; kcoef<nkcoefs; kcoef++)
-	  fscanf(fp, "%le", &data->pespline[mbin].kspline[pcoef].coefs[kcoef]);
-      splinealloc(&data->pespline[mbin].pspline, 1, npcoefs, 4,
-		  data->pespline[mbin].pmin, data->pespline[mbin].pmax);
-      splinealloc(&data->pespline[mbin].ddkspline, 1, npcoefs, 4,
-		  data->pespline[mbin].pmin, data->pespline[mbin].pmax);
-    } /* end loop mbin */
-
-    /* Close input file */
-    fclose(fp);
-  }
-
-  MPI_Bcast(&data->nmubins, 1, MPI_INT, 0, MPI_COMM_WORLD);
   if (myrank) {
     if ((data->mubounds = (double *)malloc((data->nmubins+1) * sizeof(double))) == NULL) {
       fputs("Out of memory in readspline.\n", stderr);
@@ -379,6 +324,8 @@ spline3d *readspline(const char *fname)
       exit(2);
     }
   }
+
+  /* Broadcast data */
   MPI_Bcast(data->mubounds, data->nmubins+1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
   for (mbin=0; mbin<data->nmubins; mbin++) {
     MPI_Bcast(&data->pespline[mbin].npcoefs, 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -407,10 +354,11 @@ spline3d *readspline(const char *fname)
   MPI_Bcast(&data->pmax, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
   MPI_Bcast(&data->cmin, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
   MPI_Bcast(&data->emax, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+  MPI_Bcast(&data->logbins, 1, MPI_INT, 0, MPI_COMM_WORLD);
+#endif
 
   return data;
 }
-#endif
 
 /******************************************************************************/
 // Find the mu bin containing the specified mu value.

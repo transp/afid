@@ -7,6 +7,16 @@ CC = gcc
 CFLAGS    = -Wall -O2
 FFLAGS    = -Wall -O2
 
+ifdef PARTICLE_MPI
+PSCC = mpicc
+TEFC = mpifort
+PSFLAGS = -DPARTICLE_MPI
+else
+PSCC = $(CC)
+TEFC = $(FC)
+PSFLAGS =
+endif
+
 # Includes, F90 Use files
 F90MODS = -I./ -I$(NTCCHOME)/mod
 INCLUDES = -I./ -I$(NETCDFHOME)/include
@@ -29,7 +39,7 @@ condense: condense.c
 	$(CC) $(CFLAGS) -o $@ $< -L${NETCDFC_HOME}/lib -lnetcdf
 
 testEsplines: testEsplines.f90 spline_interface.o particleSplines.o
-	$(FC) $(FFLAGS) testEsplines.f90 -o $@ \
+	$(TEFC) $(FFLAGS) testEsplines.f90 -o $@ \
 	spline_interface.o particleSplines.o \
 	-L${GSL_HOME}/lib -lgsl -lgslcblas -lm
 
@@ -37,10 +47,10 @@ particle_sort: particle_sort.c particleIO.o
 	$(CC) $(CFLAGS) -o $@ $< particleIO.o -L${NETCDFC_HOME}/lib -lnetcdf
 
 spline_interface.o: spline_interface.c spline_interface.h
-	$(CC) -c $(CFLAGS) $(INCLUDES) -o $@ $<
+	$(CC) -c $(CFLAGS) -o $@ $<
 
 particleSplines.o: particleSplines.c particleSplines.h spline_interface.h
-	$(CC) -c $(CFLAGS) $(INCLUDES) -o $@ $<
+	$(PSCC) -c $(CFLAGS) $(PSFLAGS) -o $@ $<
 
 %.o: %.c
 	$(CC) -c $(CFLAGS) $(INCLUDES) -o $@ $<
