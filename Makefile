@@ -26,7 +26,7 @@ L_LAPACK = -L$(LAPACKHOME)/lib -llapack -lblas -lsmlib
 L_TRANSP = -L$(NTCCHOME)/lib \
 	-lplasma_state -lps_xplasma2 -lplasma_state_kernel \
 	-lxplasma2 -lgeqdsk_mds -lmdstransp -lvaxonly -lnscrunch \
-	-lfluxav -lr8bloat -lpspline -lezcdf \
+	-lfluxav -lr8bloat -L$(PSPLINE_HOME)/lib -lpspline -lezcdf \
 	-llsode -llsode_linpack -lcomput -lportlib
 L_NETCDF  = -L$(NETCDFHOME)/lib -lnetcdf -lnetcdff
 L_MDSPLUS = -L$(MDSPLUS_DIR)/lib -lMdsLib
