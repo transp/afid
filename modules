@@ -9,4 +9,4 @@ module load netcdf-c
 module load netcdf-fortran
 module load mdsplus
 module load lapack
-#module load gsl
+module load gsl
