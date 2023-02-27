@@ -1,8 +1,8 @@
 #ifndef SPLINE_INTERFACE_H
 #define SPLINE_INTERFACE_H
 
-#include <gsl/gsl_bspline.h>
-#include <gsl/gsl_multifit.h>
+#include "gsl/gsl_bspline.h"
+#include "gsl/gsl_multifit.h"
 
 /* Macros */
 #define LOWER_BOUND_ZERO   1

@@ -1,4 +1,5 @@
 # source ./modules to set up module environment for build
+
 EXE = condense mcgen fitjac testEsplines particle_sort
 
 # GNU compiler options
@@ -18,25 +19,29 @@ PSFLAGS =
 endif
 
 # Includes, F90 Use files
-F90MODS = -I./ -I$(NTCCHOME)/mod
-INCLUDES = -I./ -I$(NETCDFHOME)/include
+F90MODS = -I./ -I$(NTCC_HOME)/mod
+INCLUDES = -I./ -I$(NETCDF_FORTRAN_HOME)/include
 
 # Libraries
 L_LAPACK = -L$(LAPACKHOME)/lib -llapack -lblas -lsmlib
-L_TRANSP = -L$(NTCCHOME)/lib \
+L_TRANSP = -L$(NTCC_HOME)/lib \
 	-lplasma_state -lps_xplasma2 -lplasma_state_kernel \
 	-lxplasma2 -lgeqdsk_mds -lmdstransp -lvaxonly -lnscrunch \
 	-lfluxav -lr8bloat -L$(PSPLINE_HOME)/lib -lpspline -lezcdf \
 	-llsode -llsode_linpack -lcomput -lportlib
-L_NETCDF  = -L$(NETCDFHOME)/lib -lnetcdf -lnetcdff
+L_NETCDF  = -L$(NETCDF_FORTRAN_HOME)/lib -lnetcdf -lnetcdff
 L_MDSPLUS = -L$(MDSPLUS_DIR)/lib -lMdsLib
+
+all:  $(EXE)
+
+refresh: clean all
 
 fitjac: fitjac.c particleIO.o spline_interface.o
 	$(CC) $(CFLAGS) -o $@ $< particleIO.o spline_interface.o \
-	-L${GSL_HOME}/lib -lgsl -lgslcblas -L${NETCDFC_HOME}/lib -lnetcdf -lm
+	-L${GSL_HOME}/lib -lgsl -lgslcblas -L${NETCDF_C_HOME}/lib -lnetcdf -lm
 
 condense: condense.c
-	$(CC) $(CFLAGS) -o $@ $< -L${NETCDFC_HOME}/lib -lnetcdf
+	$(CC) $(CFLAGS) -o $@ $< -L${NETCDF_C_HOME}/lib -lnetcdf -lm
 
 testEsplines: testEsplines.f90 spline_interface.o particleSplines.o
 	$(TEFC) $(FFLAGS) testEsplines.f90 -o $@ \
@@ -44,10 +49,10 @@ testEsplines: testEsplines.f90 spline_interface.o particleSplines.o
 	-L${GSL_HOME}/lib -lgsl -lgslcblas -lm
 
 particle_sort: particle_sort.c particleIO.o
-	$(CC) $(CFLAGS) -o $@ $< particleIO.o -L${NETCDFC_HOME}/lib -lnetcdf
+	$(CC) $(CFLAGS) -o $@ $< particleIO.o -L${NETCDF_C_HOME}/lib -lnetcdf
 
 spline_interface.o: spline_interface.c spline_interface.h
-	$(CC) -c $(CFLAGS) -o $@ $<
+	$(CC) -c $(CFLAGS) -I$(GSL_HOME)/include -o $@ $<
 
 particleSplines.o: particleSplines.c particleSplines.h spline_interface.h
 	$(PSCC) -c $(CFLAGS) $(PSFLAGS) -o $@ $<
@@ -57,8 +62,6 @@ particleSplines.o: particleSplines.c particleSplines.h spline_interface.h
 
 %.o: %.f90
 	$(FC) -c -fopenmp $(FFLAGS) $(F90MODS) $(INCLUDES) -o $@ $<
-
-all:  $(EXE)
 
 mcgen: mcgen.o
 	$(FC) -o $@ -fopenmp $< $(L_TRANSP) $(L_NETCDF) $(L_LAPACK) $(L_MDSPLUS)
